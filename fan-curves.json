@@ -1,0 +1,39 @@
+{
+    "pwm1": {
+        "input_sensors": {
+            "type": "single",
+            "adapter": "jc42-i2c-1-1a",
+            "sensor": "temp1"
+        },
+        "mode": "linear_interpolation",
+        "points": [
+            [60, 77],
+            [90, 255]
+        ]
+    },
+    "pwm2": {
+        "input_sensors": {
+            "type": "single",
+            "adapter": "k10temp-pci-00c3",
+            "sensor": "Tctl"
+        },
+        "mode": "linear_interpolation",
+        "points": [
+            [0, 26],
+            [60, 26],
+            [90, 255]
+        ]
+    },
+    "pwm3": {
+        "input_sensors": {
+            "type": "single",
+            "adapter": "jc42-i2c-1-1a",
+            "sensor": "temp1"
+        },
+        "mode": "linear_interpolation",
+        "points": [
+            [50, 127],
+            [90, 255]
+        ]
+    }
+}

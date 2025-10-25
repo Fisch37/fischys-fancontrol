@@ -1,0 +1,208 @@
+use std::{collections::HashMap, error::Error, hash::Hash};
+
+use log::{debug, info, log_enabled, warn};
+use serde_derive::{Deserialize, Serialize};
+
+use crate::{groupie::QueryResult, pwms::Pwm, utils::SimpleError};
+
+fn f64_avg<I: IntoIterator<Item = f64>>(iterator: I) -> f64 {
+    let mut sum: f64 = 0.0;
+    let mut count: i64 = 0;
+    for v in iterator {
+        sum += v;
+        count += 1;
+    }
+    // count is not an f64 initially as that may cause it to get stuck during incrementation
+    // due to float imprecision in large numbers.
+    // Rounding to the next float at the end ensures an accurate(ish) value
+    return sum / (count as f64);
+}
+
+fn f64_median<I: IntoIterator<Item = f64>>(iterator: I) -> Option<f64> {
+    let mut values: Vec<f64> = iterator.into_iter().collect();
+    if values.len() == 0 {
+        return None;
+    }
+    values.sort_by(f64::total_cmp);
+    let middle = values.len()/2;
+    Some(if values.len() % 2 == 0 {
+        (values[middle] + values[middle+1]) / 2.0
+    } else {
+        values[middle + 1]
+    })
+}
+
+fn f64_1() -> f64 { 1.0 }
+
+#[typetag::serde(tag = "type")]
+trait PwmControl : std::fmt::Debug {
+    fn evaluate(&self, state: &QueryResult) -> Option<f64>;
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug)]
+pub struct SingleSensorControl {
+    pub adapter: String,
+    pub sensor: String,
+    #[serde(default = "f64_1")]
+    pub factor: f64
+}
+impl Hash for SingleSensorControl {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.adapter.hash(state);
+        self.sensor.hash(state);
+    }
+}
+impl PartialEq for SingleSensorControl {
+    fn eq(&self, other: &Self) -> bool {
+        // Not a perfect .eq method, but it works... enough
+        self.adapter == other.adapter && self.sensor == other.sensor
+    }
+}
+impl Eq for SingleSensorControl { }
+#[typetag::serde(name = "single")]
+impl PwmControl for SingleSensorControl {
+    fn evaluate(&self, state: &QueryResult) -> Option<f64> {
+        let temperatures = state.get_of_kind(crate::groupie::SensorKind::Temperature);
+        if log_enabled!(log::Level::Debug) {
+            debug!("{:#?}", temperatures);
+            debug!("{:?}", self);
+        }
+        return temperatures.get(&self.adapter, &self.sensor)
+            .map(|sensor| self.factor*sensor.input);
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug)]
+pub struct MultiSensorControl {
+    pub sensors: Vec<SingleSensorControl>,
+    pub operation: SensorMergeOperation
+}
+#[derive(Serialize, Deserialize)]
+#[derive(Debug)]
+pub enum SensorMergeOperation {
+    MIN, MAX, AVERAGE, MEDIAN
+}
+#[typetag::serde(name = "multi")]
+impl PwmControl for MultiSensorControl {
+    fn evaluate(&self, state: &QueryResult) -> Option<f64> {
+        let chosen_sensors = self.sensors.iter()
+            // FIXME: Replace this with fail-fast semantics.
+            //  (Should return None if any of the control.evaluate calls returned None)
+            .filter_map(|control| control.evaluate(state));
+        match self.operation {
+            SensorMergeOperation::MIN => chosen_sensors.reduce(f64::min),
+            SensorMergeOperation::MAX => chosen_sensors.reduce(f64::max),
+            SensorMergeOperation::AVERAGE => Some(f64_avg(chosen_sensors)),
+            SensorMergeOperation::MEDIAN => f64_median(chosen_sensors)
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PwmCurve {
+    input_sensors: Box<dyn PwmControl>,
+    mode: CurveMode,
+    points: Vec<(f64, u8)>,
+    min: u8,
+    max: u8
+}
+#[derive(Clone, Copy, Debug)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CurveMode {
+    LinearInterpolation
+}
+impl CurveMode {
+    pub fn interpolate(self, x: f64, low: f64, low_val: u8, high: f64, high_val: u8) -> u8 {
+        match self {
+            Self::LinearInterpolation => f64::clamp(
+                low_val as f64 + (x - low)*((high_val - low_val) as f64)/(high - low), 
+                u8::MIN as f64, u8::MAX as f64
+            ) as u8
+        }
+    }
+}
+
+pub fn update_pwms(state: &QueryResult, pwms: &Vec<Pwm>, curves: &HashMap<String, PwmCurve>) -> Result<(), Vec<Box<dyn Error>>> {
+    let mut errors = vec![]; // don't want to set a capacity here. normally empty
+    fn push_err<E: Error + 'static>(errors: &mut Vec<Box<dyn Error>>, e: E) {
+        errors.push(Box::new(e));
+    }
+
+    for pwm in pwms {
+        let pwm_name = pwm.get_name_string();
+        let curve = match curves.get(&pwm_name) {
+            None => continue,
+            Some(x) => x
+        };
+        let value = match curve.input_sensors.evaluate(state) {
+            None => {
+                warn!("Failed to get sensor data for pwm {}. Sensor not found", pwm_name);
+                continue
+            },
+            Some(x) => x
+        };
+        let mut low_index: Option<usize> = None;
+        for (i, (point, _)) in (&curve.points).iter().enumerate() {
+            if value >= *point {
+                low_index = Some(i);
+            } else {
+                break;
+            }
+        }
+        let high_index: Option<usize> = match low_index {
+            None => {
+                // value < points[0]
+                Some(0)
+            },
+            Some(low_index) => {
+                if value >= curve.points[curve.points.len() - 1].0 {
+                    // value > points[-1]
+                    None
+                } else {
+                    Some(low_index+1)
+                }
+            }
+        };
+        let pwm_value: u8 = match low_index {
+            None => curve.min,
+            Some(low_index) => {
+                match high_index {
+                    None => curve.max,
+                    Some(high_index) => {
+                        let low = match curve.points.get(low_index) {
+                            Some(i) => i,
+                            None => {
+                                push_err(&mut errors, SimpleError::new(format!("Out of bounds low index {low_index} for {pwm_name}")));
+                                continue;
+                            }
+                        };
+                        let high = match curve.points.get(high_index) {
+                            Some(i) => i,
+                            None => {
+                                push_err(&mut errors, SimpleError::new(format!("Out of bounds high index {high_index} for {pwm_name}")));
+                                continue;
+                            }
+                        };
+                        curve.mode.interpolate(value, low.0, low.1, high.0, high.1)
+                    }
+                }
+            }
+        };
+        if log_enabled!(log::Level::Info) {
+            info!("{}: {:.1}°C (li {:?}; hi {:?}) -> {}", pwm_name, value, low_index, high_index, pwm_value);
+        }
+        match pwm.set_value(pwm_value) {
+            Ok(_) => {},
+            Err(e) => {
+                warn!("Failed to set pwm for {}: {}", pwm_name, e);
+                push_err(&mut errors, e);
+            }
+        }
+    }
+
+    if errors.is_empty() { Ok(()) }
+    else { Err(errors) }
+}
