@@ -1,7 +1,6 @@
-use std::{collections::HashMap, env, fmt::Write as _, fs, path::Path, sync::{atomic::{AtomicBool, Ordering}, Arc}, thread::sleep, time::Duration};
+use std::{collections::HashMap, env, fmt::Write as _, fs, panic::catch_unwind, path::Path, sync::{atomic::{AtomicBool, Ordering}, Arc}, thread::sleep, time::Duration};
 
 use log::{error, info, warn};
-use notify_rust::Notification;
 use simple_logger::init_with_env;
 use systemd_journal_logger::{connected_to_journal, JournalLog};
 
@@ -25,18 +24,29 @@ fn reload_config() -> Result<HashMap<String, PwmCurve>, String> {
     }
 }
 
+fn start_logger() -> Result<(), String> {
+    {
+        if connected_to_journal() {
+            JournalLog::new().map_err(|e| e.to_string())
+                .and_then(|log|
+                    log.install()
+                    .map_err(|e| e.to_string())
+                    .inspect(|_| info!("Started JournalLog"))
+                )
+        } else {
+            Err("Journal not connected".to_string())
+        }
+    }
+    .or_else(|e| {
+        error!("{e}");
+        init_with_env()
+            .map_err(|e| format!("Failed to setup simple logger: {e}"))
+            .inspect(|_| info!("JournalLog not available. Using simple logger"))
+    })
+}
+
 const MAX_AUTO_RETRIES_ON_EXIT: u8 = 5;
 fn start_inner() -> Result<(), String> {
-    if connected_to_journal() {
-        JournalLog::new().map_err(|e| format!("Failed to setup journalctl logger: {e}"))?
-            .install().map_err(|e| format!("Failed to install journalctl logger: {e}"))?;
-        info!("Started JournalLog");
-    } else {
-        init_with_env()
-            .map_err(|e| format!("Failed to setup simple logger: {e}"))?;
-        info!("JournalLog not available. Using simple logger");
-    }
-    
     let must_reload_config = Arc::new(AtomicBool::new(false));
     match signal_hook::flag::register(signal_hook::consts::SIGHUP, must_reload_config.clone()) {
         Ok(_) => { },
@@ -136,13 +146,21 @@ fn start_inner() -> Result<(), String> {
 }
 
 pub fn start() {
-    start_inner().inspect_err(|e| {
-        #[cfg(target_os = "linux")]
-        Notification::new()
-            .summary("Fancontrol Crashed!")
-            .body(e.as_str())
-            .urgency(notify_rust::Urgency::Critical)
-            .timeout(0)
-            .show().unwrap();
-    }).unwrap();
+    match start_logger() {
+        Ok(_) => info!("Hello logging!"),
+        Err(e) => println!("Logging setup failed. Yeesh. {e}")
+    }
+
+    loop {
+        match catch_unwind(|| start_inner()) {
+            Ok(Ok(_)) => {
+                info!("Exited regularly");
+                break
+            },
+            Ok(Err(e)) => error!("Service routine exited with an error. Restarting it. Error: {e}"),
+            Err(_) => {
+                error!("Service panicked! Attempting to restart it!")
+            }
+        }
+    }
 }
