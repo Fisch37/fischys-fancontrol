@@ -125,7 +125,14 @@ impl CurveMode {
     }
 }
 
-pub fn update_pwms(state: &QueryResult, pwms: &Vec<Pwm>, curves: &HashMap<String, PwmCurve>) -> Result<(), Vec<Box<dyn Error>>> {
+pub fn update_pwms<U>(
+    state: &QueryResult,
+    pwms: &[Pwm],
+    curves: &HashMap<String, PwmCurve>,
+    for_each_update: &mut U
+) -> Result<(), Vec<Box<dyn Error>>>
+    where U: FnMut((&str, f64, u8)) -> ()
+{
     let mut errors = vec![]; // don't want to set a capacity here. normally empty
     fn push_err<E: Error + 'static>(errors: &mut Vec<Box<dyn Error>>, e: E) {
         errors.push(Box::new(e));
@@ -137,7 +144,7 @@ pub fn update_pwms(state: &QueryResult, pwms: &Vec<Pwm>, curves: &HashMap<String
             None => continue,
             Some(x) => x
         };
-        let value = match curve.input_sensors.evaluate(state) {
+        let combined_temp = match curve.input_sensors.evaluate(state) {
             None => {
                 warn!("Failed to get sensor data for pwm {}. Sensor not found", pwm_name);
                 continue
@@ -146,7 +153,7 @@ pub fn update_pwms(state: &QueryResult, pwms: &Vec<Pwm>, curves: &HashMap<String
         };
         let mut low_index: Option<usize> = None;
         for (i, (point, _)) in (&curve.points).iter().enumerate() {
-            if value >= *point {
+            if combined_temp >= *point {
                 low_index = Some(i);
             } else {
                 break;
@@ -158,7 +165,7 @@ pub fn update_pwms(state: &QueryResult, pwms: &Vec<Pwm>, curves: &HashMap<String
                 Some(0)
             },
             Some(low_index) => {
-                if value >= curve.points[curve.points.len() - 1].0 {
+                if combined_temp >= curve.points[curve.points.len() - 1].0 {
                     // value > points[-1]
                     None
                 } else {
@@ -166,6 +173,7 @@ pub fn update_pwms(state: &QueryResult, pwms: &Vec<Pwm>, curves: &HashMap<String
                 }
             }
         };
+        // TODO: This is syntactically bad and can be improved
         let pwm_value: u8 = match low_index {
             None => curve.min,
             Some(low_index) => {
@@ -186,13 +194,14 @@ pub fn update_pwms(state: &QueryResult, pwms: &Vec<Pwm>, curves: &HashMap<String
                                 continue;
                             }
                         };
-                        curve.mode.interpolate(value, low.0, low.1, high.0, high.1)
+                        curve.mode.interpolate(combined_temp, low.0, low.1, high.0, high.1)
                     }
                 }
             }
         };
+        for_each_update((&pwm_name, combined_temp, pwm_value));
         if log_enabled!(log::Level::Info) {
-            info!("{}: {:.1}°C (li {:?}; hi {:?}) -> {}", pwm_name, value, low_index, high_index, pwm_value);
+            info!("{}: {:.1}°C (li {:?}; hi {:?}) -> {}", pwm_name, combined_temp, low_index, high_index, pwm_value);
         }
         match pwm.set_value(pwm_value) {
             Ok(_) => {},

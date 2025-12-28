@@ -109,7 +109,7 @@ fn start_inner() -> Result<(), String> {
             Ok(_) => { },
             Err(e) => warn!("Failed to query sensor state: {}", e)
         }
-        match update_pwms(&state, &pwms, &fan_curves) {
+        match update_pwms(&state, &pwms, &fan_curves, &mut |_| {}) {
             Ok(_) => { },
             Err(errors) => {
                 // I would have preferred cleaner handling

@@ -58,18 +58,17 @@ impl Pwm {
         self.get_name().to_owned()
     }
 
-    pub fn read_value(self: &Pwm) -> Result<u8, Box<dyn std::error::Error>> {
+    pub fn read_value(&self) -> Result<u8, Box<dyn std::error::Error>> {
         let buf = read_to_string(&self.base_path)?;
         Ok(buf.trim().parse()?)
     }
 
-    pub fn is_auto(self: &Pwm) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn is_auto(&self) -> Result<bool, Box<dyn std::error::Error>> {
         let buf = read_to_string(self.special_file("enable"))?;
         Ok(buf.trim().parse::<u8>()? > 1)
     }
 
-    // FIXME: These methods mutate the state of the PWM, but don't borrow mutably
-    pub fn set_auto(self: &Pwm, auto: bool) -> Result<(), std::io::Error> {
+    pub fn set_auto(&self, auto: bool) -> Result<(), std::io::Error> {
         let mut file = OpenOptions::new()
             .write(true)
             .open(self.special_file("enable"))?;
@@ -77,7 +76,7 @@ impl Pwm {
         Ok(())
     }
 
-    pub fn set_value(self: &Pwm, value: u8) -> Result<(), std::io::Error> {
+    pub fn set_value(&self, value: u8) -> Result<(), std::io::Error> {
         let mut file = OpenOptions::new()
             .write(true)
             .open(&self.base_path)?;
@@ -85,7 +84,7 @@ impl Pwm {
         Ok(())
     }
 
-    fn special_file(self: &Pwm, extension: &str) -> PathBuf {
+    fn special_file(&self, extension: &str) -> PathBuf {
         let mut filename = self.base_path.file_name().unwrap().to_os_string();
         filename.push("_");
         filename.push(extension);
