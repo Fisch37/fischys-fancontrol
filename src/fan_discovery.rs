@@ -1,7 +1,10 @@
 use std::{iter::zip, thread::sleep, time::Duration};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{groupie::{query_sensors, QueryResult, SensorKind}, pwms::Pwm};
 
+#[derive(Serialize, Deserialize)]
 pub struct Pwm2Fan {
     pub pwm: String,
     pub fans: Vec<(String, String)>

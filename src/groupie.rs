@@ -1,9 +1,45 @@
-use std::{cmp::Ordering, error::Error, hash::Hash, ops::Index, rc::Rc, slice::SliceIndex};
+use std::{borrow::Borrow, cmp::Ordering, error::Error, hash::Hash, ops::{Deref, Index}, rc::Rc, slice::SliceIndex};
 
 use strum::{EnumCount, EnumIter};
 
 mod nvidia;
 mod lm_sensors;
+
+pub trait SensorKey {
+    fn get_sensor_key(&self) -> (&str, &str);
+
+    fn cmp_by_sensor_key<T: SensorKey>(&self, other: T) -> Ordering {
+        let my_key = self.get_sensor_key();
+        let other_key = other.get_sensor_key();
+        match my_key.0.cmp(other_key.0) {
+            Ordering::Equal => my_key.1.cmp(other_key.1),
+            x => x
+        }
+    }
+
+    fn write_key(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let key = self.get_sensor_key();
+        write!(f, "{}/{}", key.0, key.1)
+    }
+
+    fn get_sensor_name(&self) -> &str {
+        self.get_sensor_key().1
+    }
+
+    fn get_adapter_key(&self) -> &str {
+        self.get_sensor_key().0
+    }
+}
+impl<A: AsRef<str>, B: AsRef<str>> SensorKey for (A, B) {
+    fn get_sensor_key(&self) -> (&str, &str) {
+        (self.0.as_ref(), self.1.as_ref())
+    }
+}
+impl<T: SensorKey> SensorKey for &T {
+    fn get_sensor_key(&self) -> (&str, &str) {
+        (*self).get_sensor_key()
+    }
+}
 
 #[derive(Debug, Eq)]
 pub struct Adapter {
@@ -26,7 +62,7 @@ impl Ord for Adapter {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SensorData {
     pub kind: SensorKind,
     pub name: String,
@@ -35,15 +71,20 @@ pub struct SensorData {
     pub max: f64,
     pub adapter: Rc<Adapter>
 }
-impl PartialEq for SensorData {
-    fn eq(&self, other: &Self) -> bool {
-        self.adapter == other.adapter && self.name == other.name
+impl SensorKey for SensorData {
+    fn get_sensor_key(&self) -> (&str, &str) {
+        (&self.adapter.key, &self.name)
+    }
+}
+impl<T: SensorKey> PartialEq<T> for SensorData {
+    fn eq(&self, other: &T) -> bool {
+        self.get_sensor_key() == other.get_sensor_key()
     }
 }
 impl Eq for SensorData { }
-impl PartialOrd for SensorData {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
+impl<T: SensorKey> PartialOrd<T> for SensorData {
+    fn partial_cmp(&self, other: &T) -> Option<Ordering> {
+        Some(self.cmp_by_sensor_key(other))
     }
 }
 impl Ord for SensorData {
@@ -53,10 +94,7 @@ impl Ord for SensorData {
 }
 impl SensorData {
     fn cmp_wireframe(&self, adapter: &String, name: &String) -> Ordering {
-        match self.adapter.key.cmp(adapter) {
-            Ordering::Equal => self.name.cmp(name),
-            a => a
-        }
+        self.cmp_by_sensor_key((adapter, name))
     }
 }
 
@@ -92,7 +130,7 @@ impl QueryResult {
         return QueryResult { internal: [const { SensorStorage::new() }; SensorKind::COUNT] };
     }
 
-    pub fn get_of_kind<'a>(&'a self, kind: SensorKind) -> &'a SensorStorage {
+    pub const fn get_of_kind<'a>(&'a self, kind: SensorKind) -> &'a SensorStorage {
         &self.internal[kind as usize]
     }
 
@@ -117,9 +155,26 @@ impl QueryResult {
         }
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SensorStorage {
     internal: Vec<SensorData>
+}
+impl Deref for SensorStorage {
+    type Target = [SensorData];
+
+    fn deref(&self) -> &Self::Target {
+        &self.internal
+    }
+}
+impl AsRef<Vec<SensorData>> for SensorStorage {
+    fn as_ref(&self) -> &Vec<SensorData> {
+        &self.internal
+    }
+}
+impl Borrow<Vec<SensorData>> for SensorStorage {
+    fn borrow(&self) -> &Vec<SensorData> {
+        &self.internal
+    }
 }
 impl<'a> IntoIterator for &'a SensorStorage {
     type Item = &'a SensorData;
@@ -127,7 +182,7 @@ impl<'a> IntoIterator for &'a SensorStorage {
     type IntoIter = std::slice::Iter<'a, SensorData>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.internal.as_slice().into_iter()
+        self.iter()
     }
 }
 impl<I: SliceIndex<[SensorData], Output = SensorData>> Index<I> for SensorStorage {
@@ -149,11 +204,19 @@ impl SensorStorage {
         SensorStorage { internal: Vec::new() }
     }
 
-    pub fn get(&self, adapter: &String, name: &String) -> Option<&SensorData> {
-        match self.internal.binary_search_by(|sensor| sensor.cmp_wireframe(adapter, name)) {
+    pub fn get_from_parts(&self, adapter: &String, name: &String) -> Option<&SensorData> {
+        self.get(&(adapter, name))
+    }
+
+    pub fn get<Key: SensorKey>(&self, key: &Key) -> Option<&SensorData> {
+        match self.internal.binary_search_by(|sensor| sensor.cmp_by_sensor_key(key)) {
             Ok(i) => Some(&self.internal[i]),
             Err(_) => None
         }
+    }
+
+    pub fn unpack(self) -> Vec<SensorData> {
+        self.internal
     }
 
     fn add(&mut self, data: SensorData) -> Result<(), SensorData> {

@@ -68,7 +68,7 @@ impl PwmControl for SingleSensorControl {
             debug!("{:#?}", temperatures);
             debug!("{:?}", self);
         }
-        return temperatures.get(&self.adapter, &self.sensor)
+        return temperatures.get_from_parts(&self.adapter, &self.sensor)
             .map(|sensor| self.factor*sensor.input);
     }
 }

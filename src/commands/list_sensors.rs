@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use strum::IntoEnumIterator;
 
 use crate::groupie::{query_sensors, QueryResult, SensorKind};
@@ -17,7 +19,7 @@ pub fn start() {
     for kind in SensorKind::iter() {
         println!("{:?}:", kind);
         let mut last_adapter = None;
-        for sensor in state.get_of_kind(kind) {
+        for sensor in state.get_of_kind(kind).deref() {
             if Some(&*sensor.adapter) != last_adapter {
                 println!("{} ({})", sensor.adapter.name, sensor.adapter.key);
             }

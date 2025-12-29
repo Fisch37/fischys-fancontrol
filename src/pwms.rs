@@ -18,10 +18,13 @@ impl Pwm {
     pub fn scan() -> Result<Vec<Pwm>, std::io::Error> {
         // TODO: Make this code not suck
         let mut pwms = vec![];
-        for monitor_dir in Path::new(HWMON_PATH).read_dir()?.filter_map(|dir_result| {
-            dir_result.inspect_err(|e| warn!("I/O Error while iterating over hwmons directory: {}", e))
-                .ok()
-        }) {
+        for monitor_dir in Path::new(HWMON_PATH).read_dir()?
+            // Skip unsuccessful read_dir results
+            .filter_map(|dir_result| {
+                dir_result.inspect_err(|e| warn!("I/O Error while iterating over hwmons directory: {}", e))
+                    .ok()
+            })
+        {
             if !monitor_dir.file_name().to_str()
                 .map_or(false, |filename| HWMON_PATTERN.is_match(filename))
             { continue; }
