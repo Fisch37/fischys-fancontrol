@@ -2,7 +2,7 @@ use std::{iter::zip, thread::sleep, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{GlobalContext, groupie::{QueryResult, SensorKind, query_sensors}, pwms::{FanController as _, Pwm}};
+use crate::{GlobalContext, groupie::{QueryResult, SensorKind, query_sensors}, controllers::{FanController as _, Pwm}};
 
 #[derive(Serialize, Deserialize)]
 pub struct Pwm2Fan {

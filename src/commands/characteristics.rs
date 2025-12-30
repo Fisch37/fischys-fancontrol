@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt::Display, fs::File, io::{ErrorKind, stdout}, ops::Deref};
 
 
-use crate::{CHARACTERISTICS_PATH, GlobalContext, fan_configuration::{FanProperties, detect_fan_properties}, fan_discovery::{Pwm2Fan, discover_pwm_fans}, pwms::{FanController as _, Pwm}};
+use crate::{CHARACTERISTICS_PATH, GlobalContext, fan_configuration::{FanProperties, detect_fan_properties}, fan_discovery::{Pwm2Fan, discover_pwm_fans}, controllers::{FanController as _, Pwm}};
 
 type FanAssociations = Vec<Pwm2Fan>;
 enum FanAssociationError {

@@ -6,9 +6,7 @@ use log::warn;
 pub mod fan_configuration;
 pub mod fan_discovery;
 pub mod groupie;
-pub mod pwms;
-#[cfg(feature = "nvml")]
-pub mod nvml;
+pub mod controllers;
 pub mod curves;
 pub mod utils;
 mod commands;

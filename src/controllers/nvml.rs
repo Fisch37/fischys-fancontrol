@@ -2,7 +2,7 @@
 
 use nvml_wrapper::{Device, Nvml, enums::device::FanControlPolicy, error::NvmlError};
 
-use crate::pwms::FanController;
+use super::FanController;
 
 pub struct DeviceIterator<'a> {
     nvml: &'a Nvml,

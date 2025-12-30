@@ -3,7 +3,7 @@ use std::{collections::HashMap, error::Error, hash::Hash};
 use log::{info, log_enabled, warn};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{groupie::QueryResult, pwms::{FanController as _, Pwm}, utils::SimpleError};
+use crate::{groupie::QueryResult, controllers::{FanController as _, Pwm}, utils::SimpleError};
 
 fn f64_avg<I: IntoIterator<Item = f64>>(iterator: I) -> f64 {
     let mut sum: f64 = 0.0;

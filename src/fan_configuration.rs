@@ -2,7 +2,7 @@ use std::{fmt::Display, iter::{repeat_with, zip}, thread::sleep, time::Duration}
 
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{GlobalContext, groupie::{QueryResult, SensorData, SensorKey, SensorKind, query_sensors}, pwms::{FanController as _, Pwm}};
+use crate::{GlobalContext, groupie::{QueryResult, SensorData, SensorKey, SensorKind, query_sensors}, controllers::{FanController as _, Pwm}};
 
 
 #[derive(Serialize, Deserialize)]

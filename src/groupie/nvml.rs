@@ -2,7 +2,7 @@ use crate::{GlobalContext, groupie::QueryResult};
 
 #[cfg(feature = "nvml")]
 mod nvml_internal {
-    pub use crate::nvml::get_devices;
+    pub use crate::controllers::nvml::get_devices;
 }
 
 #[cfg(feature = "nvml")]

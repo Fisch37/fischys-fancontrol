@@ -4,7 +4,7 @@ use log::{error, info, warn};
 use simple_logger::init_with_env;
 use systemd_journal_logger::{connected_to_journal, JournalLog};
 
-use crate::{CONFIG_PATH, CURVES_FILE, DEFAULT_POLL_RATE, GlobalContext, POLL_ENV, curves::{PwmCurve, update_pwms}, groupie::{QueryResult, query_sensors}, pwms::{self, FanController as _}};
+use crate::{CONFIG_PATH, CURVES_FILE, DEFAULT_POLL_RATE, GlobalContext, POLL_ENV, controllers::{FanController as _, Pwm}, curves::{PwmCurve, update_pwms}, groupie::{QueryResult, query_sensors}};
 
 fn reload_config() -> Result<HashMap<String, PwmCurve>, String> {
     let mut curves_file = Path::new(CONFIG_PATH).to_owned();
@@ -70,7 +70,7 @@ fn start_inner(context: GlobalContext) -> Result<(), String> {
     let mut state = QueryResult::new();
     let mut pwms;
     loop {
-        match pwms::Pwm::scan() {
+        match Pwm::scan() {
             Ok(p) => {
                 pwms = p;
                 break;
