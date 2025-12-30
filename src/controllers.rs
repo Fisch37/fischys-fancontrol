@@ -2,12 +2,13 @@ pub mod pwm;
 #[cfg(feature = "nvml")]
 pub mod nvml;
 
+use std::fmt::Display;
+
 pub use pwm::Pwm;
 
-pub trait FanController {
-    type WriteError;
-    type ReadError;
+pub type Result<T> = std::result::Result<T, FanControlError>;
 
+pub trait FanController {
     /// Get the identifying key of this fan controller.
     /// This result must be unique to each logical controller on the system.
     /// This means that two FanController instances may share the same key,
@@ -15,10 +16,10 @@ pub trait FanController {
     fn get_key(&self) -> &str;
 
     /// Read the current setting of the FanController.
-    fn read_value(&self) -> Result<f64, Self::ReadError>;
+    fn read_value(&self) -> Result<f64>;
     /// Write a new setting to the FanController.
     /// Should fail if value is not within [`FanController::get_min_max_value`]
-    fn write_value(&mut self, value: f64) -> Result<(), Self::WriteError>;
+    fn write_value(&mut self, value: f64) -> Result<()>;
     
     /// Get the minimum value acceptable for this controller.
     fn get_min_value(&self) -> f64;
@@ -33,9 +34,60 @@ pub trait FanController {
     }
 
     /// Whether the program currently controls this fan controller.
-    fn is_auto(&self) -> Result<bool, Self::ReadError>;
+    fn is_auto(&self) -> Result<bool>;
     /// Set whether the program currently controls this fan controller.
     /// A value of false usually means that the controller will run automatically,
     /// however it may be possible for some fan controllers to run in parallel.
-    fn set_auto(&mut self, auto: bool) -> Result<(), Self::WriteError>;
+    fn set_auto(&mut self, auto: bool) -> Result<()>;
+}
+
+#[derive(Debug)]
+pub enum FanControlError {
+    InvalidData,
+    CommunicationLost,
+    PermissionDenied,
+    /// Some other unexpected error
+    Unexpected(Box<dyn std::error::Error>)
+}
+impl Display for FanControlError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use self::FanControlError::*;
+        match self {
+            InvalidData => write!(f, "Invalid data was read or written to the controller"),
+            CommunicationLost => write!(f, "Communication with the controller has been lost"),
+            PermissionDenied => write!(f, "Permission denied"),
+            Unexpected(e) => write!(f, "An unexpected error occured: {e}"),
+        }
+    }
+}
+impl std::error::Error for FanControlError { }
+impl From<std::io::Error> for FanControlError {
+    fn from(value: std::io::Error) -> Self {
+        use self::FanControlError::*;
+        use std::io::ErrorKind;
+        match value.kind() {
+            ErrorKind::InvalidData => InvalidData,
+            ErrorKind::NotFound
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::ConnectionReset
+            | ErrorKind::HostUnreachable
+            | ErrorKind::NetworkUnreachable
+            | ErrorKind::NetworkDown
+             => CommunicationLost,
+            ErrorKind::PermissionDenied | ErrorKind::ConnectionRefused => PermissionDenied,
+            _ => Unexpected(Box::new(value))
+        }
+    }
+}
+#[cfg(feature = "nvml")]
+impl From<nvml_wrapper::error::NvmlError> for FanControlError {
+    fn from(value: nvml_wrapper::error::NvmlError) -> Self {
+        use self::FanControlError::*;
+        use nvml_wrapper::error::NvmlError;
+        match value {
+            NvmlError::GpuLost => CommunicationLost,
+            NvmlError::NoPermission => PermissionDenied,
+            e => Unexpected(Box::new(e))
+        }
+    }
 }

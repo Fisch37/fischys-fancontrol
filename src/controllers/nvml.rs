@@ -2,6 +2,8 @@
 
 use nvml_wrapper::{Device, Nvml, enums::device::FanControlPolicy, error::NvmlError};
 
+use crate::controllers::FanControlError;
+
 use super::FanController;
 
 pub struct DeviceIterator<'a> {
@@ -73,18 +75,17 @@ impl<'nvml> NVIDIAFanController<'nvml> {
     }
 }
 impl<'nvml> FanController for NVIDIAFanController<'nvml> {
-    type WriteError = NvmlError;
-    type ReadError = NvmlError;
-
     fn get_key(&self) -> &str {
         &self.key
     }
 
-    fn read_value(&self) -> Result<f64, Self::ReadError> {
+    fn read_value(&self) -> Result<f64, FanControlError> {
         self.device.fan_speed(self.fan_idx).map(Into::into)
+            .map_err(Into::into)
     }
-    fn write_value(&mut self, value: f64) -> Result<(), Self::WriteError> {
+    fn write_value(&mut self, value: f64) -> Result<(), FanControlError> {
         self.device.set_fan_speed(self.fan_idx, value.round() as u32)
+            .map_err(Into::into)
     }
 
     fn get_min_value(&self) -> f64 {
@@ -94,22 +95,26 @@ impl<'nvml> FanController for NVIDIAFanController<'nvml> {
         self.get_min_max_value().1
     }
     fn get_min_max_value(&self) -> (f64, f64) {
+        // FIXME: This will crash if NVMLError::GpuLost occurs
+        //  We should instead propagate the error further up
         let (min, max) = self.device.min_max_fan_speed()
             // GPU should have fans, because we check for that ahead of time.
-            // (I don't think a GPU will just _lose_ its fans at runtime)
+            // (I don't think a GPU will just lose its fans at runtime)
             // Device may drop off the bus suddenly, but I don't think we can do anything about it?
             .expect("GPU can't give us its min-max speed. Help!");
         (min as f64, max as f64)
     }
 
-    fn is_auto(&self) -> Result<bool, Self::ReadError> {
-        self.device.fan_control_policy(self.fan_idx).map(|policy| policy != FanControlPolicy::Manual)
+    fn is_auto(&self) -> Result<bool, FanControlError> {
+        self.device.fan_control_policy(self.fan_idx)
+            .map(|policy| policy != FanControlPolicy::Manual)
+            .map_err(Into::into)
     }
-    fn set_auto(&mut self, auto: bool) -> Result<(), Self::WriteError> {
+    fn set_auto(&mut self, auto: bool) -> Result<(), FanControlError> {
         self.device.set_fan_control_policy(
             self.fan_idx,
             if auto { FanControlPolicy::TemperatureContinousSw }
             else { FanControlPolicy::Manual }
-        )
+        ).map_err(Into::into)
     }
 }

@@ -1,16 +1,15 @@
-use std::{ffi::OsStr, fmt::Debug, fs::{OpenOptions, read_to_string}, io::Write, path::{Path, PathBuf}};
+use std::{ffi::OsStr, fmt::Debug, fs::{OpenOptions, read_to_string}, io::{ErrorKind, Write, Error as IOError}, path::{Path, PathBuf}};
 
 use lazy_static::lazy_static;
 use log::warn;
 use regex::Regex;
 
+use crate::controllers::FanControlError;
+
 use super::FanController;
 
 const HWMON_PATH: &str = "/sys/class/hwmon";
-// const HWMON_PATTERN: &str = r"^hwmon[0-9]+$";
-// const PWM_PATTERN: &str = r"^pwm[1-9][0-9]*$";
-// const HWMON_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^hwmon[0-9]+$").unwrap());
-// const PWM_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^pwm[1-9][0-9]*$").unwrap());
+const PWM_IS_AUTO_THRESHOLD: u8 = 2;
 lazy_static! {
     static ref HWMON_PATTERN: Regex = Regex::new(r"^hwmon[0-9]+$").unwrap();
     static ref PWM_PATTERN: Regex = Regex::new(r"^pwm[1-9][0-9]*$").unwrap();
@@ -22,7 +21,7 @@ pub struct Pwm {
 }
 
 impl Pwm {
-    pub fn scan() -> Result<Vec<Pwm>, std::io::Error> {
+    pub fn scan() -> Result<Vec<Pwm>, IOError> {
         // TODO: Make this code not suck
         let mut pwms = vec![];
         for monitor_dir in Path::new(HWMON_PATH).read_dir()?
@@ -70,19 +69,19 @@ impl Pwm {
     }
 }
 impl FanController for Pwm {
-    type ReadError = Box<dyn std::error::Error>;
-    type WriteError = std::io::Error;
-
-
     fn get_key(&self) -> &str {
         self.get_name_raw().to_str().unwrap()
     }
 
-    fn read_value(&self) -> Result<f64, Self::ReadError> {
+    fn read_value(&self) -> Result<f64, FanControlError> {
         let buf = read_to_string(&self.base_path)?;
-        Ok(buf.trim().parse()?)
+        buf.trim().parse()
+            // ParseFloatError has exactly two error types: empty and invalid.
+            // Both are invalid data.
+            .map_err(|_| ErrorKind::InvalidData.into())
+            .map_err(|e: IOError| e.into())
     }
-    fn write_value(&mut self, value: f64) -> Result<(), Self::WriteError> {
+    fn write_value(&mut self, value: f64) -> Result<(), FanControlError> {
         let mut file = OpenOptions::new()
             .write(true)
             .open(&self.base_path)?;
@@ -91,11 +90,13 @@ impl FanController for Pwm {
         Ok(())
     }
 
-    fn is_auto(&self) -> Result<bool, Self::ReadError> {
+    fn is_auto(&self) -> Result<bool, FanControlError> {
         let buf = read_to_string(self.special_file("enable"))?;
-        Ok(buf.trim().parse::<u8>()? > 1)
+        buf.trim().parse::<u8>().map(|x| x >= PWM_IS_AUTO_THRESHOLD)
+            .map_err(|_| ErrorKind::InvalidData.into())
+            .map_err(|e: IOError| e.into())
     }
-    fn set_auto(&mut self, auto: bool) -> Result<(), Self::WriteError> {
+    fn set_auto(&mut self, auto: bool) -> Result<(), FanControlError> {
         let mut file = OpenOptions::new()
             .write(true)
             .open(self.special_file("enable"))?;
