@@ -46,7 +46,7 @@ const FAN_SLOWDOWN_DELAY: Duration = Duration::from_secs(10);
 /// Determines the RPM curve of a fan depending on another PWM state.
 /// This function assumes that the sensor pwm combo passed actually matches each other.
 /// If this is not the case, the output will be nonsensical.
-pub fn detect_fan_properties<Key: SensorKey>(pwm: &Pwm, rpm_sensors: &[Key]) -> Result<Vec<FanProperties>, Box<dyn std::error::Error>> {
+pub fn detect_fan_properties<Key: SensorKey>(pwm: &mut Pwm, rpm_sensors: &[Key]) -> Result<Vec<FanProperties>, Box<dyn std::error::Error>> {
     eprintln!("Graphing {}", pwm.get_key());
     let previous_responsibility_state = pwm.is_auto()?;
 
@@ -107,7 +107,7 @@ pub fn detect_fan_properties<Key: SensorKey>(pwm: &Pwm, rpm_sensors: &[Key]) -> 
     )
 }
 
-fn find_start_values<Key: SensorKey>(pwm: &Pwm, rpm_sensors: &[Key], state: &mut QueryResult) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
+fn find_start_values<Key: SensorKey>(pwm: &mut Pwm, rpm_sensors: &[Key], state: &mut QueryResult) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
     let pwm_max = pwm.get_max_value();
     pwm.write_value(pwm.get_min_value())?;
     sleep(FAN_SLOWDOWN_DELAY - FAN_STEP_DELAY);
@@ -141,7 +141,7 @@ fn find_start_values<Key: SensorKey>(pwm: &Pwm, rpm_sensors: &[Key], state: &mut
 
 /// Finds all rpm sensors tied to this PWM control.
 /// At the end of this function the PWM will be set to manual mode!
-pub fn find_controlled_fans(pwm: &Pwm) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
+pub fn find_controlled_fans(pwm: &mut Pwm) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
     let mut query_result = QueryResult::new();
 
     // Phase 1: Set PWM HIGH

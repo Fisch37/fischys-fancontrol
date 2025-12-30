@@ -28,7 +28,7 @@ pub trait FanController {
     fn read_value(&self) -> Result<f64, Self::ReadError>;
     /// Write a new setting to the FanController.
     /// Should fail if value is not within [`FanController::get_min_max_value`]
-    fn write_value(&self, value: f64) -> Result<(), Self::WriteError>;
+    fn write_value(&mut self, value: f64) -> Result<(), Self::WriteError>;
     
     /// Get the minimum value acceptable for this controller.
     fn get_min_value(&self) -> f64;
@@ -47,7 +47,7 @@ pub trait FanController {
     /// Set whether the program currently controls this fan controller.
     /// A value of false usually means that the controller will run automatically,
     /// however it may be possible for some fan controllers to run in parallel.
-    fn set_auto(&self, auto: bool) -> Result<(), Self::WriteError>;
+    fn set_auto(&mut self, auto: bool) -> Result<(), Self::WriteError>;
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
@@ -116,7 +116,7 @@ impl FanController for Pwm {
         let buf = read_to_string(&self.base_path)?;
         Ok(buf.trim().parse()?)
     }
-    fn write_value(&self, value: f64) -> Result<(), Self::WriteError> {
+    fn write_value(&mut self, value: f64) -> Result<(), Self::WriteError> {
         let mut file = OpenOptions::new()
             .write(true)
             .open(&self.base_path)?;
@@ -129,7 +129,7 @@ impl FanController for Pwm {
         let buf = read_to_string(self.special_file("enable"))?;
         Ok(buf.trim().parse::<u8>()? > 1)
     }
-    fn set_auto(&self, auto: bool) -> Result<(), Self::WriteError> {
+    fn set_auto(&mut self, auto: bool) -> Result<(), Self::WriteError> {
         let mut file = OpenOptions::new()
             .write(true)
             .open(self.special_file("enable"))?;

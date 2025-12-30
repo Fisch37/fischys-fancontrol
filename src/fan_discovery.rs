@@ -22,7 +22,7 @@ fn join_borrowed<'a, I: IntoIterator<Item = &'a str>>(vec: I, separator: char) -
 const SENSITIVITY: f64 = 300.0;
 pub fn discover_pwm_fans() -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
     let mut state = QueryResult::new();
-    let pwms = Pwm::scan()?;
+    let mut pwms = Pwm::scan()?;
     
     query_sensors(&mut state)?;
     {
@@ -33,7 +33,7 @@ pub fn discover_pwm_fans() -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
         println!("Found {} pwms: {}", pwms.len(), join_borrowed(pwms.iter().map(|p| p.get_key()), ' '));
     }
 
-    for p in &pwms {
+    for p in &mut pwms {
         p.set_auto(false)?;
         p.write_value(p.get_max_value())?;
     }
@@ -48,7 +48,7 @@ pub fn discover_pwm_fans() -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
     let fan_speeds: Vec<f64> = state.get_of_kind(SensorKind::Fan).into_iter()
         .map(|f: &crate::groupie::SensorData| f.input).collect();
     let mut influence_list: Vec<Vec<usize>> = Vec::new();
-    for p in &pwms {
+    for p in &mut pwms {
         println!("Testing {}", p.get_key());
         p.write_value(p.get_min_value())?;
         sleep(Duration::from_secs(5));
@@ -73,7 +73,7 @@ pub fn discover_pwm_fans() -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
         sleep(Duration::from_secs(5));
     }
 
-    for p in &pwms {
+    for p in &mut pwms {
         p.set_auto(true)?;
     }
 

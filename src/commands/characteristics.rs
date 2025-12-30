@@ -43,8 +43,8 @@ pub fn start() {
         }
     };
 
-    let pwms = Pwm::scan().unwrap();
-    for pwm in &pwms {
+    let mut pwms = Pwm::scan().unwrap();
+    for pwm in &mut pwms {
         pwm.set_auto(false).unwrap();
         pwm.write_value(pwm.get_max_value()).unwrap();
     }
@@ -52,7 +52,7 @@ pub fn start() {
     let mut fan_characteristics: BTreeMap<&str, Vec<FanProperties>> = BTreeMap::new();
     let mut is_partial = false;
     for Pwm2Fan {pwm: pwm_name, fans}  in &associations {
-        let pwm = match pwms.iter().find(|p| p.get_key() == pwm_name) {
+        let pwm = match pwms.iter_mut().find(|p| p.get_key() == pwm_name) {
             Some(x) => x,
             None => {
                 eprintln!("Couldn't find {pwm_name}! Skipping it and all its fans :(");

@@ -120,7 +120,7 @@ impl CurveMode {
 
 pub fn update_pwms<U>(
     state: &QueryResult,
-    pwms: &[Pwm],
+    pwms: &mut [Pwm],
     curves: &HashMap<String, PwmCurve>,
     for_each_update: &mut U
 ) -> Result<(), Vec<Box<dyn Error>>>
@@ -210,7 +210,7 @@ pub fn update_pwms<U>(
         match pwm.write_value(pwm_value) {
             Ok(_) => {},
             Err(e) => {
-                warn!("Failed to set pwm for {}: {}", pwm_name, e);
+                warn!("Failed to set pwm for {}: {}", pwm.get_key(), e);
                 push_err(&mut errors, e);
             }
         }

@@ -68,7 +68,7 @@ fn start_inner() -> Result<(), String> {
     let mut fan_curves: HashMap<String, PwmCurve> = reload_config()?;
     
     let mut state = QueryResult::new();
-    let pwms;
+    let mut pwms;
     loop {
         match pwms::Pwm::scan() {
             Ok(p) => {
@@ -80,7 +80,7 @@ fn start_inner() -> Result<(), String> {
         sleep(Duration::from_secs(1));
     }
     'outer: loop {
-        for p in &pwms {
+        for p in &mut pwms {
             match p.set_auto(false).and_then(|_| p.write_value(p.get_max_value())) {
                 Ok(_) => { },
                 Err(e) => {
@@ -109,7 +109,7 @@ fn start_inner() -> Result<(), String> {
             Ok(_) => { },
             Err(e) => warn!("Failed to query sensor state: {}", e)
         }
-        match update_pwms(&state, &pwms, &fan_curves, &mut |_| {}) {
+        match update_pwms(&state, &mut pwms, &fan_curves, &mut |_| {}) {
             Ok(_) => { },
             Err(errors) => {
                 // I would have preferred cleaner handling
@@ -130,7 +130,7 @@ fn start_inner() -> Result<(), String> {
     let mut pwms_buffer = Vec::new(); // Expected state has 0 failures. Avoids allocation
     let mut retries: u8 = MAX_AUTO_RETRIES_ON_EXIT;
     while !pwms_to_automate.is_empty() && retries > 0 {
-        for p in &pwms_to_automate {
+        for p in &mut pwms_to_automate {
             match p.set_auto(true) {
                 Ok(_) => { },
                 Err(e) => {
