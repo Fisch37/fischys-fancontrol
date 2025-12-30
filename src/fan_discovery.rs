@@ -35,7 +35,7 @@ pub fn discover_pwm_fans() -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
 
     for p in &pwms {
         p.set_auto(false)?;
-        p.write_value(255)?;
+        p.write_value(p.get_max_value())?;
     }
     sleep(Duration::from_secs(5));
     println!("Spun up fans");
@@ -46,11 +46,11 @@ pub fn discover_pwm_fans() -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
     println!();
 
     let fan_speeds: Vec<f64> = state.get_of_kind(SensorKind::Fan).into_iter()
-        .map(|f| f.input).collect();
+        .map(|f: &crate::groupie::SensorData| f.input).collect();
     let mut influence_list: Vec<Vec<usize>> = Vec::new();
     for p in &pwms {
         println!("Testing {}", p.get_key());
-        p.write_value(0)?;
+        p.write_value(p.get_min_value())?;
         sleep(Duration::from_secs(5));
         query_sensors(&mut state)?;
         let fans = state.get_of_kind(SensorKind::Fan);
@@ -69,7 +69,7 @@ pub fn discover_pwm_fans() -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
         println!("{} affects {}", p.get_key(), str);
         
         influence_list.push(affected_fans);
-        p.write_value(255)?;
+        p.write_value(p.get_max_value())?;
         sleep(Duration::from_secs(5));
     }
 

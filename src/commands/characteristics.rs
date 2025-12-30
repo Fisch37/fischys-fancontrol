@@ -46,7 +46,7 @@ pub fn start() {
     let pwms = Pwm::scan().unwrap();
     for pwm in &pwms {
         pwm.set_auto(false).unwrap();
-        pwm.write_value(u8::MAX).unwrap();
+        pwm.write_value(pwm.get_max_value()).unwrap();
     }
 
     let mut fan_characteristics: BTreeMap<&str, Vec<FanProperties>> = BTreeMap::new();

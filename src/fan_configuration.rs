@@ -9,12 +9,12 @@ use crate::{groupie::{QueryResult, SensorData, SensorKey, SensorKind, query_sens
 pub struct FanProperties {
     pub sensor: (String, String),
     pub rpm_curve: Vec<Point>,
-    pub safe_start: u8
+    pub safe_start: f64
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Point {
-    pwm: u8,
+    pwm: f64,
     rpm: f64
 }
 
@@ -34,7 +34,7 @@ impl Display for Error {
 }
 impl std::error::Error for Error { }
 
-const PRECISION: u8 = 15;
+const PRECISION: f64 = 15.0;
 const ACTIVATION_BOUNDRY: f64 = 5.0;
 const FAN_DETECTION_THRESHOLD: f64 = 0.7;
 
@@ -53,11 +53,11 @@ pub fn detect_fan_properties<Key: SensorKey>(pwm: &Pwm, rpm_sensors: &[Key]) -> 
     let mut state = QueryResult::new();
     pwm.set_auto(false)?;
     
-    let mut rpm_curves: Vec<Vec<Point>> = repeat_with(|| Vec::with_capacity((u8::MAX/PRECISION) as usize + 1))
+    let mut rpm_curves: Vec<Vec<Point>> = repeat_with(|| Vec::with_capacity((pwm.get_max_value()/PRECISION) as usize + 1))
         .take(rpm_sensors.len())
         .collect();
     
-    let mut value: u8 = u8::MAX;
+    let mut value: f64 = pwm.get_max_value();
     pwm.write_value(value)?;
     // Fan needs to get up to speed
     sleep(FAN_SPEEDUP_DELAY);
@@ -107,23 +107,24 @@ pub fn detect_fan_properties<Key: SensorKey>(pwm: &Pwm, rpm_sensors: &[Key]) -> 
     )
 }
 
-fn find_start_values<Key: SensorKey>(pwm: &Pwm, rpm_sensors: &[Key], state: &mut QueryResult) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    pwm.write_value(0)?;
+fn find_start_values<Key: SensorKey>(pwm: &Pwm, rpm_sensors: &[Key], state: &mut QueryResult) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
+    let pwm_max = pwm.get_max_value();
+    pwm.write_value(pwm.get_min_value())?;
     sleep(FAN_SLOWDOWN_DELAY - FAN_STEP_DELAY);
     // using u8::MAX here is fine, because the loop below breaks before u8::MAX is called
-    let mut start_values = vec![u8::MAX; rpm_sensors.len()];
-    let mut value = 0;
+    let mut start_values = vec![pwm_max; rpm_sensors.len()];
+    let mut value = pwm.get_min_value();
     // not checking u8::MAX here is fine since it would be the last value and is used as the placeholder above.
     // therefore, anything that would activate at u8::MAX, will have u8::MAX even though we never actually checked against it.
     // NOTE: there is a flaw here, in that if a fan were to never activate, it would also get u8::MAX, therefore that value is inherently unreliable.
     //  This is an acceptable tradeoff to me. If a fan hasn't started yet on 240, I doubt it will start on 255. (Most fans won't reach this value anyway)
-    while start_values.contains(&u8::MAX) && value < u8::MAX {
+    while start_values.contains(&pwm_max) && value < pwm_max {
         pwm.write_value(value)?;
         sleep(FAN_STEP_DELAY);
         query_sensors(state)?;
 
         for (key, start_value) in zip(rpm_sensors, start_values.iter_mut())
-            .filter(|(_, b)| **b == u8::MAX)
+            .filter(|(_, b)| **b == pwm_max)
         {
             let sensor = state.get_of_kind(SensorKind::Fan).get(key)
                 .ok_or_else(|| Error { message: format!("Sensor disappeared during fan-start analysis: {}/{}", key.get_adapter_key(), key.get_sensor_name()) })?;
@@ -132,8 +133,8 @@ fn find_start_values<Key: SensorKey>(pwm: &Pwm, rpm_sensors: &[Key], state: &mut
                 eprintln!("Fan {}/{} started at value {value} ({} RPM)", key.get_adapter_key(), key.get_sensor_name(), sensor.input);
             }
         }
-
-        value = value.saturating_add(PRECISION);
+        // Naive adding is fine, because inf !< inf in Rust, so the loop will still exit
+        value += PRECISION;
     }
     Ok(start_values)
 }
@@ -145,13 +146,13 @@ pub fn find_controlled_fans(pwm: &Pwm) -> Result<Vec<(String, String)>, Box<dyn 
 
     // Phase 1: Set PWM HIGH
     pwm.set_auto(false)?;
-    pwm.write_value(u8::MAX)?;
+    pwm.write_value(pwm.get_max_value())?;
     sleep(FAN_SPEEDUP_DELAY);
     query_sensors(&mut query_result)?;
     let phase1_states = query_result.get_of_kind(SensorKind::Fan).clone();
 
     // Phase 2: Set PWM low
-    pwm.write_value(u8::MIN)?;
+    pwm.write_value(pwm.get_min_value())?;
     sleep(FAN_SLOWDOWN_DELAY);
     query_sensors(&mut query_result)?;
 

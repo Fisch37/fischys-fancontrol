@@ -81,7 +81,7 @@ fn start_inner() -> Result<(), String> {
     }
     'outer: loop {
         for p in &pwms {
-            match p.set_auto(false).and_then(|_| p.write_value(255)) {
+            match p.set_auto(false).and_then(|_| p.write_value(p.get_max_value())) {
                 Ok(_) => { },
                 Err(e) => {
                     warn!("Failed to set pwm {} to auto mode. Trying again. Error: {}", p.get_key(), e);

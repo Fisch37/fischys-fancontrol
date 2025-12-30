@@ -104,9 +104,9 @@ impl PwmControl for MultiSensorControl {
 pub struct PwmCurve {
     input_sensors: Box<dyn PwmControl>,
     mode: CurveMode,
-    points: Vec<(f64, u8)>,
-    min: u8,
-    max: u8
+    points: Vec<(f64, f64)>,
+    min: f64,
+    max: f64
 }
 #[derive(Clone, Copy, Debug)]
 #[derive(Serialize, Deserialize)]
@@ -115,12 +115,9 @@ pub enum CurveMode {
     LinearInterpolation
 }
 impl CurveMode {
-    pub fn interpolate(self, x: f64, low: f64, low_val: u8, high: f64, high_val: u8) -> u8 {
+    pub fn interpolate(self, x: f64, low: (f64, f64), high: (f64, f64)) -> f64 {
         match self {
-            Self::LinearInterpolation => f64::clamp(
-                low_val as f64 + (x - low)*((high_val - low_val) as f64)/(high - low), 
-                u8::MIN as f64, u8::MAX as f64
-            ) as u8
+            Self::LinearInterpolation => low.1 + (x - low.0)*(high.1 - low.1)/(high.0 - low.0),
         }
     }
 }
@@ -131,7 +128,7 @@ pub fn update_pwms<U>(
     curves: &HashMap<String, PwmCurve>,
     for_each_update: &mut U
 ) -> Result<(), Vec<Box<dyn Error>>>
-    where U: FnMut((&str, f64, u8))
+    where U: FnMut((&str, f64, f64))
 {
     let mut errors = vec![]; // don't want to set a capacity here. normally empty
     fn push_err<E: Error + 'static>(errors: &mut Vec<Box<dyn Error>>, e: E) {
@@ -151,30 +148,41 @@ pub fn update_pwms<U>(
             },
             Some(x) => x
         };
-        let mut low_index: Option<usize> = None;
-        for (i, (point, _)) in curve.points.iter().enumerate() {
-            if combined_temp >= *point {
-                low_index = Some(i);
+        // Find lower end interpolation point (or None if combined_temp < the lowest point)
+        let low_index: Option<usize> = curve.points.iter().enumerate()
+            .rfind(|(_, (point, _))| *point < combined_temp)
+            .map(|(i, _)| i);
+        // for (i, (point, _)) in curve.points.iter().enumerate() {
+        //     if combined_temp < *point {
+        //         break;
+        //     }
+        //     low_index = Some(i);
+        // }
+        // If low_index.is_none(), then combined_temp < the lowest interpolation point => high_index = 0
+        let high_index: Option<usize> = low_index.map_or(Some(0), |low_index| {
+            if low_index < curve.points.len() - 1 {
+                Some(low_index + 1)
             } else {
-                break;
+                None
             }
-        }
-        let high_index: Option<usize> = match low_index {
-            None => {
-                // value < points[0]
-                Some(0)
-            },
-            Some(low_index) => {
-                if combined_temp >= curve.points[curve.points.len() - 1].0 {
-                    // value > points[-1]
-                    None
-                } else {
-                    Some(low_index+1)
-                }
-            }
-        };
+        });
+        // let high_index: Option<usize> = match low_index {
+        //     None => {
+        //         // value < points[0]
+        //         Some(0)
+        //     },
+        //     Some(low_index) => {
+        //         if combined_temp >= curve.points[curve.points.len() - 1].0 {
+        //             // value > points[-1]
+        //             None
+        //         } else {
+        //             Some(low_index+1)
+        //         }
+        //     }
+        // };
+        let (pwm_min, pwm_max) = pwm.get_min_max_value();
         // TODO: This is syntactically bad and can be improved
-        let pwm_value: u8 = match low_index {
+        let pwm_value: f64 = f64::clamp(match low_index {
             None => curve.min,
             Some(low_index) => {
                 match high_index {
@@ -194,11 +202,11 @@ pub fn update_pwms<U>(
                                 continue;
                             }
                         };
-                        curve.mode.interpolate(combined_temp, low.0, low.1, high.0, high.1)
+                        curve.mode.interpolate(combined_temp, *low, *high)
                     }
                 }
             }
-        };
+        }, pwm_min, pwm_max);
         for_each_update((pwm_name, combined_temp, pwm_value));
         if log_enabled!(log::Level::Info) {
             info!("{}: {:.1}°C (li {:?}; hi {:?}) -> {}", pwm_name, combined_temp, low_index, high_index, pwm_value);

@@ -25,18 +25,19 @@ pub trait FanController {
     fn get_key(&self) -> &str;
 
     /// Read the current setting of the FanController.
-    fn read_value(&self) -> Result<u8, Self::ReadError>;
+    fn read_value(&self) -> Result<f64, Self::ReadError>;
     /// Write a new setting to the FanController.
     /// Should fail if value is not within [`FanController::get_min_max_value`]
-    fn write_value(&self, value: u8) -> Result<(), Self::WriteError>;
+    fn write_value(&self, value: f64) -> Result<(), Self::WriteError>;
     
     /// Get the minimum value acceptable for this controller.
     fn get_min_value(&self) -> f64;
     /// Get the maximum value acceptable for this controller.
     fn get_max_value(&self) -> f64;
     /// Get the minimum _and_ maximum value acceptable for this controller.
-    /// The default implementation calls [`FanController::get_min_value`] and [`FanController::get_max_value`].
-    /// Custom implementations must ensure that the return value will be identical to the default implementation.
+    /// 
+    /// Note that if you need both min and max, it is always better to call this function
+    /// instead of [`FanController::get_min_value`] and [`FanController::get_max_value`] separately.
     fn get_min_max_value(&self) -> (f64, f64) {
         (self.get_min_value(), self.get_max_value())
     }
@@ -111,15 +112,16 @@ impl FanController for Pwm {
         self.get_name_raw().to_str().unwrap()
     }
 
-    fn read_value(&self) -> Result<u8, Self::ReadError> {
+    fn read_value(&self) -> Result<f64, Self::ReadError> {
         let buf = read_to_string(&self.base_path)?;
         Ok(buf.trim().parse()?)
     }
-    fn write_value(&self, value: u8) -> Result<(), Self::WriteError> {
+    fn write_value(&self, value: f64) -> Result<(), Self::WriteError> {
         let mut file = OpenOptions::new()
             .write(true)
             .open(&self.base_path)?;
-        file.write_all(value.to_string().as_bytes())?;
+        let byte_out = value.clamp(u8::MIN as f64, u8::MAX as f64).round() as u8;
+        file.write_all(byte_out.to_string().as_bytes())?;
         Ok(())
     }
 
