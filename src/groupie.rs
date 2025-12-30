@@ -2,8 +2,11 @@ use std::{borrow::Borrow, cmp::Ordering, error::Error, hash::Hash, ops::{Deref, 
 
 use strum::{EnumCount, EnumIter};
 
+use crate::GlobalContext;
+
 mod nvidia;
 mod lm_sensors;
+mod nvml;
 
 pub trait SensorKey {
     fn get_sensor_key(&self) -> (&str, &str);
@@ -134,7 +137,7 @@ impl QueryResult {
         &self.internal[kind as usize]
     }
 
-    fn get_of_kind_mut(&mut self, kind: SensorKind) -> &mut SensorStorage {
+    pub fn get_of_kind_mut(&mut self, kind: SensorKind) -> &mut SensorStorage {
         &mut self.internal[kind as usize]
     }
 
@@ -224,7 +227,7 @@ impl SensorStorage {
         self.internal
     }
 
-    fn add(&mut self, data: SensorData) -> Result<(), SensorData> {
+    pub fn add(&mut self, data: SensorData) -> Result<(), SensorData> {
         match self.internal.binary_search(&data) {
             Ok(_) => Err(data),
             Err(i) => {
@@ -243,11 +246,12 @@ impl SensorStorage {
     }
 }
 
-pub fn query_sensors(state: &mut QueryResult) -> Result<(), Box<dyn Error>> {
+pub fn query_sensors(state: &mut QueryResult, context: &GlobalContext) -> Result<(), Box<dyn Error>> {
     state.clear();
 
     let res = lm_sensors::query_sensors(state)
-        .and(nvidia::query_sensors(state));
+        .and(nvidia::query_sensors(state))
+        .and(nvml::query_sensors(state, context));
 
     // Unfortunately the nature of the data structure makes it impossible to estimate the capacity per category.
     // However! If the QueryResult is reused (as it should be), there is unlikely to be any change in size after the first call.

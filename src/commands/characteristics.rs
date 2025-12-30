@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt::Display, fs::File, io::{ErrorKind, stdout}, ops::Deref};
 
 
-use crate::{CHARACTERISTICS_PATH, fan_configuration::{FanProperties, detect_fan_properties}, fan_discovery::{Pwm2Fan, discover_pwm_fans}, pwms::{FanController as _, Pwm}};
+use crate::{CHARACTERISTICS_PATH, GlobalContext, fan_configuration::{FanProperties, detect_fan_properties}, fan_discovery::{Pwm2Fan, discover_pwm_fans}, pwms::{FanController as _, Pwm}};
 
 type FanAssociations = Vec<Pwm2Fan>;
 enum FanAssociationError {
@@ -22,10 +22,11 @@ impl Display for AssociationReadError {
 }
 
 pub fn start() {
+    let context = GlobalContext::init().unwrap();
     let associations = match try_read_discovery() {
         Ok(x) => x,
         Err(AssociationReadError::IO(e)) if e.kind() == ErrorKind::NotFound => {
-            match discover_and_save() {
+            match discover_and_save(&context) {
                 Ok(x) => x,
                 Err(FanAssociationError::Discovery(e)) => {
                     eprintln!("Fan discovery failed! {e}");
@@ -60,7 +61,7 @@ pub fn start() {
             }
         };
         if !fans.is_empty() {
-            match detect_fan_properties(pwm, fans) {
+            match detect_fan_properties(pwm, fans, &context) {
                 Ok(x) => {
                     fan_characteristics.insert(pwm_name, x);
                 },
@@ -91,8 +92,8 @@ fn try_read_discovery() -> Result<FanAssociations, AssociationReadError> {
         )
 }
 
-fn discover_and_save() -> Result<FanAssociations, FanAssociationError> {
-    discover_pwm_fans()
+fn discover_and_save(context: &GlobalContext) -> Result<FanAssociations, FanAssociationError> {
+    discover_pwm_fans(context)
         .map_err(FanAssociationError::Discovery)
         .and_then(|association| {
             // would prefer to do this with some combo of map_err and map,

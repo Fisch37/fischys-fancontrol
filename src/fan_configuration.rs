@@ -2,7 +2,7 @@ use std::{fmt::Display, iter::{repeat_with, zip}, thread::sleep, time::Duration}
 
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{groupie::{QueryResult, SensorData, SensorKey, SensorKind, query_sensors}, pwms::{FanController as _, Pwm}};
+use crate::{GlobalContext, groupie::{QueryResult, SensorData, SensorKey, SensorKind, query_sensors}, pwms::{FanController as _, Pwm}};
 
 
 #[derive(Serialize, Deserialize)]
@@ -46,7 +46,7 @@ const FAN_SLOWDOWN_DELAY: Duration = Duration::from_secs(10);
 /// Determines the RPM curve of a fan depending on another PWM state.
 /// This function assumes that the sensor pwm combo passed actually matches each other.
 /// If this is not the case, the output will be nonsensical.
-pub fn detect_fan_properties<Key: SensorKey>(pwm: &mut Pwm, rpm_sensors: &[Key]) -> Result<Vec<FanProperties>, Box<dyn std::error::Error>> {
+pub fn detect_fan_properties<Key: SensorKey>(pwm: &mut Pwm, rpm_sensors: &[Key], context: &GlobalContext) -> Result<Vec<FanProperties>, Box<dyn std::error::Error>> {
     eprintln!("Graphing {}", pwm.get_key());
     let previous_responsibility_state = pwm.is_auto()?;
 
@@ -64,7 +64,7 @@ pub fn detect_fan_properties<Key: SensorKey>(pwm: &mut Pwm, rpm_sensors: &[Key])
     loop {
         pwm.write_value(value)?;
         sleep(FAN_STEP_DELAY);
-        query_sensors(&mut state)?;
+        query_sensors(&mut state, context)?;
         
         let fans = state.get_of_kind(SensorKind::Fan);
         eprint!("{value} -> ");
@@ -85,7 +85,7 @@ pub fn detect_fan_properties<Key: SensorKey>(pwm: &mut Pwm, rpm_sensors: &[Key])
     }
 
 
-    let start_values = find_start_values(pwm, rpm_sensors, &mut state)?;
+    let start_values = find_start_values(pwm, rpm_sensors, &mut state, context)?;
     eprint!("Start values: ");
     for start in &start_values {
         eprint!("{start} ");
@@ -107,7 +107,7 @@ pub fn detect_fan_properties<Key: SensorKey>(pwm: &mut Pwm, rpm_sensors: &[Key])
     )
 }
 
-fn find_start_values<Key: SensorKey>(pwm: &mut Pwm, rpm_sensors: &[Key], state: &mut QueryResult) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
+fn find_start_values<Key: SensorKey>(pwm: &mut Pwm, rpm_sensors: &[Key], state: &mut QueryResult, context: &GlobalContext) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
     let pwm_max = pwm.get_max_value();
     pwm.write_value(pwm.get_min_value())?;
     sleep(FAN_SLOWDOWN_DELAY - FAN_STEP_DELAY);
@@ -121,7 +121,7 @@ fn find_start_values<Key: SensorKey>(pwm: &mut Pwm, rpm_sensors: &[Key], state: 
     while start_values.contains(&pwm_max) && value < pwm_max {
         pwm.write_value(value)?;
         sleep(FAN_STEP_DELAY);
-        query_sensors(state)?;
+        query_sensors(state, context)?;
 
         for (key, start_value) in zip(rpm_sensors, start_values.iter_mut())
             .filter(|(_, b)| **b == pwm_max)
@@ -141,20 +141,20 @@ fn find_start_values<Key: SensorKey>(pwm: &mut Pwm, rpm_sensors: &[Key], state: 
 
 /// Finds all rpm sensors tied to this PWM control.
 /// At the end of this function the PWM will be set to manual mode!
-pub fn find_controlled_fans(pwm: &mut Pwm) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
+pub fn find_controlled_fans(pwm: &mut Pwm, context: &GlobalContext) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
     let mut query_result = QueryResult::new();
 
     // Phase 1: Set PWM HIGH
     pwm.set_auto(false)?;
     pwm.write_value(pwm.get_max_value())?;
     sleep(FAN_SPEEDUP_DELAY);
-    query_sensors(&mut query_result)?;
+    query_sensors(&mut query_result, context)?;
     let phase1_states = query_result.get_of_kind(SensorKind::Fan).clone();
 
     // Phase 2: Set PWM low
     pwm.write_value(pwm.get_min_value())?;
     sleep(FAN_SLOWDOWN_DELAY);
-    query_sensors(&mut query_result)?;
+    query_sensors(&mut query_result, context)?;
 
     // Find sensors with notable rpm drop
     // it's rare for a PWM to target multiple fans

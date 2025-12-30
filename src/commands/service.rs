@@ -4,7 +4,7 @@ use log::{error, info, warn};
 use simple_logger::init_with_env;
 use systemd_journal_logger::{connected_to_journal, JournalLog};
 
-use crate::{CONFIG_PATH, CURVES_FILE, DEFAULT_POLL_RATE, POLL_ENV, curves::{PwmCurve, update_pwms}, groupie::{QueryResult, query_sensors}, pwms::{self, FanController as _}};
+use crate::{CONFIG_PATH, CURVES_FILE, DEFAULT_POLL_RATE, GlobalContext, POLL_ENV, curves::{PwmCurve, update_pwms}, groupie::{QueryResult, query_sensors}, pwms::{self, FanController as _}};
 
 fn reload_config() -> Result<HashMap<String, PwmCurve>, String> {
     let mut curves_file = Path::new(CONFIG_PATH).to_owned();
@@ -46,7 +46,7 @@ fn start_logger() -> Result<(), String> {
 }
 
 const MAX_AUTO_RETRIES_ON_EXIT: u8 = 5;
-fn start_inner() -> Result<(), String> {
+fn start_inner(context: GlobalContext) -> Result<(), String> {
     let must_reload_config = Arc::new(AtomicBool::new(false));
     match signal_hook::flag::register(signal_hook::consts::SIGHUP, must_reload_config.clone()) {
         Ok(_) => { },
@@ -105,7 +105,7 @@ fn start_inner() -> Result<(), String> {
                 Err(_) => error!("Failed to reload config. Keeping old config just in case.")
             }
         }
-        match query_sensors(&mut state) {
+        match query_sensors(&mut state, &context) {
             Ok(_) => { },
             Err(e) => warn!("Failed to query sensor state: {}", e)
         }
@@ -152,7 +152,10 @@ pub fn start() {
     }
 
     loop {
-        match catch_unwind(start_inner) {
+        // Now GlobalContext always re-initialises when the service panics.
+        // I guess this is bad?
+        // But, I mean, essentially we now reset on panic, right? So this is completely fine, no?
+        match catch_unwind(|| start_inner(GlobalContext::init().unwrap())) {
             Ok(Ok(_)) => {
                 info!("Exited regularly");
                 break

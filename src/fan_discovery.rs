@@ -2,7 +2,7 @@ use std::{iter::zip, thread::sleep, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{groupie::{QueryResult, SensorKind, query_sensors}, pwms::{FanController as _, Pwm}};
+use crate::{GlobalContext, groupie::{QueryResult, SensorKind, query_sensors}, pwms::{FanController as _, Pwm}};
 
 #[derive(Serialize, Deserialize)]
 pub struct Pwm2Fan {
@@ -20,11 +20,11 @@ fn join_borrowed<'a, I: IntoIterator<Item = &'a str>>(vec: I, separator: char) -
 }
 
 const SENSITIVITY: f64 = 300.0;
-pub fn discover_pwm_fans() -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
+pub fn discover_pwm_fans(context: &GlobalContext) -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
     let mut state = QueryResult::new();
     let mut pwms = Pwm::scan()?;
     
-    query_sensors(&mut state)?;
+    query_sensors(&mut state, context)?;
     {
         let fans = state.get_of_kind(SensorKind::Fan)
             .into_iter().map(|s| s.name.as_str());
@@ -39,7 +39,7 @@ pub fn discover_pwm_fans() -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
     }
     sleep(Duration::from_secs(5));
     println!("Spun up fans");
-    query_sensors(&mut state)?;
+    query_sensors(&mut state, context)?;
     for fan in state.get_of_kind(SensorKind::Fan) {
         print!("{} {:.0} RPM ", fan.name, fan.input)
     }
@@ -52,7 +52,7 @@ pub fn discover_pwm_fans() -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
         println!("Testing {}", p.get_key());
         p.write_value(p.get_min_value())?;
         sleep(Duration::from_secs(5));
-        query_sensors(&mut state)?;
+        query_sensors(&mut state, context)?;
         let fans = state.get_of_kind(SensorKind::Fan);
         let mut affected_fans = vec![];
         for (i, (fan, original_speed)) in zip(fans, &fan_speeds).enumerate() {

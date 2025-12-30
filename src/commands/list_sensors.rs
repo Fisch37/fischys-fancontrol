@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use strum::IntoEnumIterator;
 
-use crate::groupie::{query_sensors, QueryResult, SensorKind};
+use crate::{GlobalContext, groupie::{QueryResult, SensorKind, query_sensors}};
 
 fn format_input(kind: SensorKind, input: f64) -> String {
     match kind {
@@ -14,8 +14,9 @@ fn format_input(kind: SensorKind, input: f64) -> String {
 }
 
 pub fn start() {
+    let context = GlobalContext::init().unwrap();
     let mut state = QueryResult::new();
-    query_sensors(&mut state).unwrap();
+    query_sensors(&mut state, &context).unwrap();
     for kind in SensorKind::iter() {
         println!("{:?}:", kind);
         let mut last_adapter = None;
