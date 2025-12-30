@@ -108,15 +108,15 @@ pub enum SensorKind {
 impl SensorKind {
     pub fn from_string(name: &str) -> Option<SensorKind> {
         if name.starts_with("temp") {
-            return Some(SensorKind::Temperature);
+            Some(SensorKind::Temperature)
         } else if name.starts_with("fan") {
-            return Some(SensorKind::Fan);
+            Some(SensorKind::Fan)
         } else if name.starts_with("in") {
-            return Some(SensorKind::Voltmeter);
+            Some(SensorKind::Voltmeter)
         } else if name.starts_with("beep") {
-            return Some(SensorKind::Beep)
+            Some(SensorKind::Beep)
         } else {
-            return None;
+            None
         }
     }
 }
@@ -127,14 +127,14 @@ pub struct QueryResult {
 impl QueryResult {
     pub fn new() -> QueryResult {
         // const block is once per array element. Don't ask me why, but I tested and that's how it works
-        return QueryResult { internal: [const { SensorStorage::new() }; SensorKind::COUNT] };
+        QueryResult { internal: [const { SensorStorage::new() }; SensorKind::COUNT] }
     }
 
-    pub const fn get_of_kind<'a>(&'a self, kind: SensorKind) -> &'a SensorStorage {
+    pub const fn get_of_kind(&self, kind: SensorKind) -> &SensorStorage {
         &self.internal[kind as usize]
     }
 
-    fn get_of_kind_mut<'a>(&'a mut self, kind: SensorKind) -> &'a mut SensorStorage {
+    fn get_of_kind_mut(&mut self, kind: SensorKind) -> &mut SensorStorage {
         &mut self.internal[kind as usize]
     }
 
@@ -153,6 +153,11 @@ impl QueryResult {
         for store in &mut self.internal {
             store.shrink_to_fit();
         }
+    }
+}
+impl Default for QueryResult {
+    fn default() -> Self {
+        Self::new()
     }
 }
 #[derive(Debug, Clone)]
@@ -194,7 +199,7 @@ impl<I: SliceIndex<[SensorData], Output = SensorData>> Index<I> for SensorStorag
 }
 impl<'a> From<&'a SensorStorage> for &'a [SensorData] {
     fn from(value: &'a SensorStorage) -> Self {
-        return &value.internal.as_slice()
+        value.internal.as_slice()
     }
 }
 impl SensorStorage {
@@ -247,5 +252,10 @@ pub fn query_sensors(state: &mut QueryResult) -> Result<(), Box<dyn Error>> {
     // Unfortunately the nature of the data structure makes it impossible to estimate the capacity per category.
     // However! If the QueryResult is reused (as it should be), there is unlikely to be any change in size after the first call.
     state.shrink_to_fit();
-    return res;
+    res
+}
+impl Default for SensorStorage {
+    fn default() -> Self {
+        Self::new()
+    }
 }

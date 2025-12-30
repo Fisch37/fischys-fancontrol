@@ -66,7 +66,7 @@ impl Pwm {
             })
         {
             if !monitor_dir.file_name().to_str()
-                .map_or(false, |filename| HWMON_PATTERN.is_match(filename))
+                .is_some_and(|filename| HWMON_PATTERN.is_match(filename))
             { continue; }
             let entry = match monitor_dir.path().read_dir() {
                 Ok(x) => x,
@@ -80,13 +80,14 @@ impl Pwm {
                     .inspect_err(|e| warn!("I/O Error while iterating over hwmon {:?}: {}", monitor_dir.path(), e))
                     .ok()
             }) {
-                if !file.file_name().to_str().map_or(false, |filename|
-                    PWM_PATTERN.is_match(filename)) { continue; }
+                if !file.file_name().to_str()
+                    .is_some_and(|filename| PWM_PATTERN.is_match(filename))
+                { continue; }
                 pwms.push(Pwm { base_path: file.path() });
             }
         }
         pwms.sort();
-        return Ok(pwms);
+        Ok(pwms)
     }
 
     fn get_name_raw(&self) -> &OsStr {

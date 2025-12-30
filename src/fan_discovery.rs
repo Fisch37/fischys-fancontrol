@@ -16,7 +16,7 @@ fn join_borrowed<'a, I: IntoIterator<Item = &'a str>>(vec: I, separator: char) -
         str += e;
         str.push(separator);
     }
-    return str;
+    str
 }
 
 const SENSITIVITY: f64 = 300.0;

@@ -88,5 +88,5 @@ pub fn query_sensors(state: &mut QueryResult) -> Result<(), Box<dyn Error>> {
         }
     }
 
-    return Ok(());
+    Ok(())
 }

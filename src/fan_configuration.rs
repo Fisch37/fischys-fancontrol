@@ -24,7 +24,7 @@ struct Error {
 }
 impl Error {
     pub fn new(message: String) -> Error {
-        Error { message: message }
+        Error { message }
     }
 }
 impl Display for Error {
@@ -117,7 +117,7 @@ fn find_start_values<Key: SensorKey>(pwm: &Pwm, rpm_sensors: &[Key], state: &mut
     // therefore, anything that would activate at u8::MAX, will have u8::MAX even though we never actually checked against it.
     // NOTE: there is a flaw here, in that if a fan were to never activate, it would also get u8::MAX, therefore that value is inherently unreliable.
     //  This is an acceptable tradeoff to me. If a fan hasn't started yet on 240, I doubt it will start on 255. (Most fans won't reach this value anyway)
-    while start_values.iter().any(|x| *x == u8::MAX) && value < u8::MAX {
+    while start_values.contains(&u8::MAX) && value < u8::MAX {
         pwm.write_value(value)?;
         sleep(FAN_STEP_DELAY);
         query_sensors(state)?;

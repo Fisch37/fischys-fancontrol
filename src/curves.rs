@@ -15,12 +15,12 @@ fn f64_avg<I: IntoIterator<Item = f64>>(iterator: I) -> f64 {
     // count is not an f64 initially as that may cause it to get stuck during incrementation
     // due to float imprecision in large numbers.
     // Rounding to the next float at the end ensures an accurate(ish) value
-    return sum / (count as f64);
+    sum / (count as f64)
 }
 
 fn f64_median<I: IntoIterator<Item = f64>>(iterator: I) -> Option<f64> {
     let mut values: Vec<f64> = iterator.into_iter().collect();
-    if values.len() == 0 {
+    if values.is_empty() {
         return None;
     }
     values.sort_by(f64::total_cmp);
@@ -68,8 +68,8 @@ impl PwmControl for SingleSensorControl {
             debug!("{:#?}", temperatures);
             debug!("{:?}", self);
         }
-        return temperatures.get_from_parts(&self.adapter, &self.sensor)
-            .map(|sensor| self.factor*sensor.input);
+        temperatures.get_from_parts(&self.adapter, &self.sensor)
+            .map(|sensor| self.factor*sensor.input)
     }
 }
 
@@ -131,7 +131,7 @@ pub fn update_pwms<U>(
     curves: &HashMap<String, PwmCurve>,
     for_each_update: &mut U
 ) -> Result<(), Vec<Box<dyn Error>>>
-    where U: FnMut((&str, f64, u8)) -> ()
+    where U: FnMut((&str, f64, u8))
 {
     let mut errors = vec![]; // don't want to set a capacity here. normally empty
     fn push_err<E: Error + 'static>(errors: &mut Vec<Box<dyn Error>>, e: E) {
@@ -152,7 +152,7 @@ pub fn update_pwms<U>(
             Some(x) => x
         };
         let mut low_index: Option<usize> = None;
-        for (i, (point, _)) in (&curve.points).iter().enumerate() {
+        for (i, (point, _)) in curve.points.iter().enumerate() {
             if combined_temp >= *point {
                 low_index = Some(i);
             } else {
@@ -199,7 +199,7 @@ pub fn update_pwms<U>(
                 }
             }
         };
-        for_each_update((&pwm_name, combined_temp, pwm_value));
+        for_each_update((pwm_name, combined_temp, pwm_value));
         if log_enabled!(log::Level::Info) {
             info!("{}: {:.1}°C (li {:?}; hi {:?}) -> {}", pwm_name, combined_temp, low_index, high_index, pwm_value);
         }

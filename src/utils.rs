@@ -7,10 +7,10 @@ pub struct SimpleError {
 }
 impl SimpleError {
     pub fn new(message: String) -> SimpleError {
-        return SimpleError { message: message };
+        SimpleError { message }
     }
     pub fn from_slice(message: &str) -> SimpleError {
-        return SimpleError { message: message.to_string() }
+        SimpleError { message: message.to_string() }
     }
 }
 impl Display for SimpleError {
@@ -70,13 +70,13 @@ impl Display for ErrorGroup {
             res = res.and(write!(f, "{},", e));
         }
         res = res.and(write!(f, "]"));
-        return res;
+        res
     }
 }
 impl Error for ErrorGroup { }
 impl ErrorGroup {
-    pub fn new() -> Self {
-        return ErrorGroup { errors: vec![] }
+    pub const fn new() -> Self {
+        ErrorGroup { errors: vec![] }
     }
 
     pub fn push<E: Error + 'static>(&mut self, e: E) {
@@ -85,5 +85,10 @@ impl ErrorGroup {
 
     pub fn is_empty(&self) -> bool {
         self.errors.is_empty()
+    }
+}
+impl Default for ErrorGroup {
+    fn default() -> Self {
+        Self::new()
     }
 }

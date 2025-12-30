@@ -16,11 +16,11 @@ fn reload_config() -> Result<HashMap<String, PwmCurve>, String> {
                 x.shrink_to_fit();
                 Ok(x)
             },
-            Err(e) => Err(format!("Could not parse curves file {e}").into())
+            Err(e) => Err(format!("Could not parse curves file {e}"))
         }
     } else {
         error!("Fan curves file does not exist. Please run setup");
-        return Err("Fan curves file does not exist. Please run setup".to_string());
+        Err("Fan curves file does not exist. Please run setup".to_string())
     }
 }
 
@@ -152,7 +152,7 @@ pub fn start() {
     }
 
     loop {
-        match catch_unwind(|| start_inner()) {
+        match catch_unwind(start_inner) {
             Ok(Ok(_)) => {
                 info!("Exited regularly");
                 break

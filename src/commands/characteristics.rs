@@ -52,10 +52,7 @@ pub fn start() {
     let mut fan_characteristics: BTreeMap<&str, Vec<FanProperties>> = BTreeMap::new();
     let mut is_partial = false;
     for Pwm2Fan {pwm: pwm_name, fans}  in &associations {
-        let pwm = match pwms.iter()
-            .filter(|p| p.get_key() == pwm_name)
-            .next()
-        {
+        let pwm = match pwms.iter().find(|p| p.get_key() == pwm_name) {
             Some(x) => x,
             None => {
                 eprintln!("Couldn't find {pwm_name}! Skipping it and all its fans :(");
@@ -88,15 +85,15 @@ pub fn start() {
 
 fn try_read_discovery() -> Result<FanAssociations, AssociationReadError> {
     File::open(CHARACTERISTICS_PATH.deref())
-        .map_err(|e| AssociationReadError::IO(e))
+        .map_err(AssociationReadError::IO)
         .and_then(|file| serde_json::from_reader(file)
-            .map_err(|e| AssociationReadError::Deserialisation(e))
+            .map_err(AssociationReadError::Deserialisation)
         )
 }
 
 fn discover_and_save() -> Result<FanAssociations, FanAssociationError> {
     discover_pwm_fans()
-        .map_err(|e| FanAssociationError::Discovery(e))
+        .map_err(FanAssociationError::Discovery)
         .and_then(|association| {
             // would prefer to do this with some combo of map_err and map,
             // but the Err branch here takes ownership of association so that's impossible
