@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt::Display, fs::File, io::{ErrorKind, stdout}, ops::Deref};
 
 
-use crate::{CHARACTERISTICS_PATH, fan_configuration::{FanProperties, detect_fan_properties}, fan_discovery::{Pwm2Fan, discover_pwm_fans}, pwms::Pwm};
+use crate::{CHARACTERISTICS_PATH, fan_configuration::{FanProperties, detect_fan_properties}, fan_discovery::{Pwm2Fan, discover_pwm_fans}, pwms::{FanController as _, Pwm}};
 
 type FanAssociations = Vec<Pwm2Fan>;
 enum FanAssociationError {
@@ -46,14 +46,14 @@ pub fn start() {
     let pwms = Pwm::scan().unwrap();
     for pwm in &pwms {
         pwm.set_auto(false).unwrap();
-        pwm.set_value(u8::MAX).unwrap();
+        pwm.write_value(u8::MAX).unwrap();
     }
 
     let mut fan_characteristics: BTreeMap<&str, Vec<FanProperties>> = BTreeMap::new();
     let mut is_partial = false;
     for Pwm2Fan {pwm: pwm_name, fans}  in &associations {
         let pwm = match pwms.iter()
-            .filter(|p| p.get_name() == pwm_name)
+            .filter(|p| p.get_key() == pwm_name)
             .next()
         {
             Some(x) => x,

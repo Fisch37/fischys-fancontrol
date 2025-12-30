@@ -2,7 +2,7 @@ use std::{fmt::Display, iter::{repeat_with, zip}, thread::sleep, time::Duration}
 
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{groupie::{QueryResult, SensorData, SensorKey, SensorKind, query_sensors}, pwms::Pwm};
+use crate::{groupie::{QueryResult, SensorData, SensorKey, SensorKind, query_sensors}, pwms::{FanController as _, Pwm}};
 
 
 #[derive(Serialize, Deserialize)]
@@ -47,7 +47,7 @@ const FAN_SLOWDOWN_DELAY: Duration = Duration::from_secs(10);
 /// This function assumes that the sensor pwm combo passed actually matches each other.
 /// If this is not the case, the output will be nonsensical.
 pub fn detect_fan_properties<Key: SensorKey>(pwm: &Pwm, rpm_sensors: &[Key]) -> Result<Vec<FanProperties>, Box<dyn std::error::Error>> {
-    eprintln!("Graphing {}", pwm.get_name());
+    eprintln!("Graphing {}", pwm.get_key());
     let previous_responsibility_state = pwm.is_auto()?;
 
     let mut state = QueryResult::new();
@@ -58,11 +58,11 @@ pub fn detect_fan_properties<Key: SensorKey>(pwm: &Pwm, rpm_sensors: &[Key]) -> 
         .collect();
     
     let mut value: u8 = u8::MAX;
-    pwm.set_value(value)?;
+    pwm.write_value(value)?;
     // Fan needs to get up to speed
     sleep(FAN_SPEEDUP_DELAY);
     loop {
-        pwm.set_value(value)?;
+        pwm.write_value(value)?;
         sleep(FAN_STEP_DELAY);
         query_sensors(&mut state)?;
         
@@ -108,7 +108,7 @@ pub fn detect_fan_properties<Key: SensorKey>(pwm: &Pwm, rpm_sensors: &[Key]) -> 
 }
 
 fn find_start_values<Key: SensorKey>(pwm: &Pwm, rpm_sensors: &[Key], state: &mut QueryResult) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    pwm.set_value(0)?;
+    pwm.write_value(0)?;
     sleep(FAN_SLOWDOWN_DELAY - FAN_STEP_DELAY);
     // using u8::MAX here is fine, because the loop below breaks before u8::MAX is called
     let mut start_values = vec![u8::MAX; rpm_sensors.len()];
@@ -118,7 +118,7 @@ fn find_start_values<Key: SensorKey>(pwm: &Pwm, rpm_sensors: &[Key], state: &mut
     // NOTE: there is a flaw here, in that if a fan were to never activate, it would also get u8::MAX, therefore that value is inherently unreliable.
     //  This is an acceptable tradeoff to me. If a fan hasn't started yet on 240, I doubt it will start on 255. (Most fans won't reach this value anyway)
     while start_values.iter().any(|x| *x == u8::MAX) && value < u8::MAX {
-        pwm.set_value(value)?;
+        pwm.write_value(value)?;
         sleep(FAN_STEP_DELAY);
         query_sensors(state)?;
 
@@ -145,13 +145,13 @@ pub fn find_controlled_fans(pwm: &Pwm) -> Result<Vec<(String, String)>, Box<dyn 
 
     // Phase 1: Set PWM HIGH
     pwm.set_auto(false)?;
-    pwm.set_value(u8::MAX)?;
+    pwm.write_value(u8::MAX)?;
     sleep(FAN_SPEEDUP_DELAY);
     query_sensors(&mut query_result)?;
     let phase1_states = query_result.get_of_kind(SensorKind::Fan).clone();
 
     // Phase 2: Set PWM low
-    pwm.set_value(u8::MIN)?;
+    pwm.write_value(u8::MIN)?;
     sleep(FAN_SLOWDOWN_DELAY);
     query_sensors(&mut query_result)?;
 

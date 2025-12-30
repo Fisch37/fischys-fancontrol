@@ -4,7 +4,7 @@ use log::{error, info, warn};
 use simple_logger::init_with_env;
 use systemd_journal_logger::{connected_to_journal, JournalLog};
 
-use crate::{curves::{update_pwms, PwmCurve}, groupie::{query_sensors, QueryResult}, pwms, CONFIG_PATH, CURVES_FILE, DEFAULT_POLL_RATE, POLL_ENV};
+use crate::{CONFIG_PATH, CURVES_FILE, DEFAULT_POLL_RATE, POLL_ENV, curves::{PwmCurve, update_pwms}, groupie::{QueryResult, query_sensors}, pwms::{self, FanController as _}};
 
 fn reload_config() -> Result<HashMap<String, PwmCurve>, String> {
     let mut curves_file = Path::new(CONFIG_PATH).to_owned();
@@ -81,10 +81,10 @@ fn start_inner() -> Result<(), String> {
     }
     'outer: loop {
         for p in &pwms {
-            match p.set_auto(false).and_then(|_| p.set_value(255)) {
+            match p.set_auto(false).and_then(|_| p.write_value(255)) {
                 Ok(_) => { },
                 Err(e) => {
-                    warn!("Failed to set pwm {} to auto mode. Trying again. Error: {}", p.get_name(), e);
+                    warn!("Failed to set pwm {} to auto mode. Trying again. Error: {}", p.get_key(), e);
                     continue 'outer;
                 }
             }
@@ -134,7 +134,7 @@ fn start_inner() -> Result<(), String> {
             match p.set_auto(true) {
                 Ok(_) => { },
                 Err(e) => {
-                    error!("Failed to automate {}. {} retries left. Error: {}", p.get_name(), retries, e);
+                    error!("Failed to automate {}. {} retries left. Error: {}", p.get_key(), retries, e);
                     pwms_buffer.push(p.clone()); // Not quite happy about this clone, but its effect should be minimal
                 }
             }

@@ -2,7 +2,7 @@ use std::{iter::zip, thread::sleep, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{groupie::{query_sensors, QueryResult, SensorKind}, pwms::Pwm};
+use crate::{groupie::{QueryResult, SensorKind, query_sensors}, pwms::{FanController as _, Pwm}};
 
 #[derive(Serialize, Deserialize)]
 pub struct Pwm2Fan {
@@ -30,12 +30,12 @@ pub fn discover_pwm_fans() -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
             .into_iter().map(|s| s.name.as_str());
         
         println!("Found {} fans: {}", fans.len(), join_borrowed(fans, ' '));
-        println!("Found {} pwms: {}", pwms.len(), join_borrowed(pwms.iter().map(|p| p.get_name()), ' '));
+        println!("Found {} pwms: {}", pwms.len(), join_borrowed(pwms.iter().map(|p| p.get_key()), ' '));
     }
 
     for p in &pwms {
         p.set_auto(false)?;
-        p.set_value(255)?;
+        p.write_value(255)?;
     }
     sleep(Duration::from_secs(5));
     println!("Spun up fans");
@@ -49,8 +49,8 @@ pub fn discover_pwm_fans() -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
         .map(|f| f.input).collect();
     let mut influence_list: Vec<Vec<usize>> = Vec::new();
     for p in &pwms {
-        println!("Testing {}", p.get_name());
-        p.set_value(0)?;
+        println!("Testing {}", p.get_key());
+        p.write_value(0)?;
         sleep(Duration::from_secs(5));
         query_sensors(&mut state)?;
         let fans = state.get_of_kind(SensorKind::Fan);
@@ -66,10 +66,10 @@ pub fn discover_pwm_fans() -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
             str += &fans[*i].name;
             str += " ";
         }
-        println!("{} affects {}", p.get_name(), str);
+        println!("{} affects {}", p.get_key(), str);
         
         influence_list.push(affected_fans);
-        p.set_value(255)?;
+        p.write_value(255)?;
         sleep(Duration::from_secs(5));
     }
 
@@ -81,7 +81,7 @@ pub fn discover_pwm_fans() -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
     let mut output = Vec::with_capacity(pwms.len());
     for (i, affected) in influence_list.iter().enumerate() {
         output.push(Pwm2Fan {
-            pwm: pwms[i].get_name().to_string(),
+            pwm: pwms[i].get_key().to_string(),
             fans: affected.iter()
                 .map(|i| (fans[*i].adapter.key.clone(), fans[*i].name.clone()))
                 .collect()

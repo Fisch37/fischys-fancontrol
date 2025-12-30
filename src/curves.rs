@@ -3,7 +3,7 @@ use std::{collections::HashMap, error::Error, hash::Hash};
 use log::{debug, info, log_enabled, warn};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{groupie::QueryResult, pwms::Pwm, utils::SimpleError};
+use crate::{groupie::QueryResult, pwms::{FanController as _, Pwm}, utils::SimpleError};
 
 fn f64_avg<I: IntoIterator<Item = f64>>(iterator: I) -> f64 {
     let mut sum: f64 = 0.0;
@@ -139,8 +139,8 @@ pub fn update_pwms<U>(
     }
 
     for pwm in pwms {
-        let pwm_name = pwm.get_name_string();
-        let curve = match curves.get(&pwm_name) {
+        let pwm_name = pwm.get_key();
+        let curve = match curves.get(pwm_name) {
             None => continue,
             Some(x) => x
         };
@@ -203,7 +203,7 @@ pub fn update_pwms<U>(
         if log_enabled!(log::Level::Info) {
             info!("{}: {:.1}°C (li {:?}; hi {:?}) -> {}", pwm_name, combined_temp, low_index, high_index, pwm_value);
         }
-        match pwm.set_value(pwm_value) {
+        match pwm.write_value(pwm_value) {
             Ok(_) => {},
             Err(e) => {
                 warn!("Failed to set pwm for {}: {}", pwm_name, e);
