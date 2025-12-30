@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt::Display, fs::File, io::{ErrorKind, stdout}, ops::Deref};
 
 
-use crate::{CHARACTERISTICS_PATH, GlobalContext, fan_configuration::{FanProperties, detect_fan_properties}, fan_discovery::{Pwm2Fan, discover_pwm_fans}, controllers::{FanController as _, Pwm}};
+use crate::{CHARACTERISTICS_PATH, GlobalContext, controllers::scan_all, fan_configuration::{FanProperties, detect_fan_properties}, fan_discovery::{Pwm2Fan, discover_pwm_fans}};
 
 type FanAssociations = Vec<Pwm2Fan>;
 enum FanAssociationError {
@@ -44,8 +44,8 @@ pub fn start() {
         }
     };
 
-    let mut pwms = Pwm::scan().unwrap();
-    for pwm in &mut pwms {
+    let mut controllers = scan_all(&context).unwrap();
+    for pwm in &mut controllers {
         pwm.set_auto(false).unwrap();
         pwm.write_value(pwm.get_max_value()).unwrap();
     }
@@ -53,7 +53,7 @@ pub fn start() {
     let mut fan_characteristics: BTreeMap<&str, Vec<FanProperties>> = BTreeMap::new();
     let mut is_partial = false;
     for Pwm2Fan {pwm: pwm_name, fans}  in &associations {
-        let pwm = match pwms.iter_mut().find(|p| p.get_key() == pwm_name) {
+        let pwm = match controllers.iter_mut().find(|p| p.get_key() == pwm_name) {
             Some(x) => x,
             None => {
                 eprintln!("Couldn't find {pwm_name}! Skipping it and all its fans :(");
@@ -61,7 +61,7 @@ pub fn start() {
             }
         };
         if !fans.is_empty() {
-            match detect_fan_properties(pwm, fans, &context) {
+            match detect_fan_properties(pwm.as_mut(), fans, &context) {
                 Ok(x) => {
                     fan_characteristics.insert(pwm_name, x);
                 },

@@ -23,6 +23,7 @@ pub struct Pwm {
 impl Pwm {
     pub fn scan() -> Result<Vec<Pwm>, IOError> {
         // TODO: Make this code not suck
+        // TODO: Make use of iterators to save on allocating a vec for this in in controllers::scan_all
         let mut pwms = vec![];
         for monitor_dir in Path::new(HWMON_PATH).read_dir()?
             // Skip unsuccessful read_dir results

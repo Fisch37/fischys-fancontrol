@@ -3,7 +3,7 @@ use std::{collections::HashMap, error::Error, hash::Hash};
 use log::{info, log_enabled, warn};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{groupie::QueryResult, controllers::{FanController as _, Pwm}, utils::SimpleError};
+use crate::{controllers::FanController, groupie::QueryResult, utils::SimpleError};
 
 fn f64_avg<I: IntoIterator<Item = f64>>(iterator: I) -> f64 {
     let mut sum: f64 = 0.0;
@@ -118,9 +118,9 @@ impl CurveMode {
     }
 }
 
-pub fn update_pwms<U>(
+pub fn update_pwms<'a, U, C: AsMut<dyn FanController + 'a>>(
     state: &QueryResult,
-    pwms: &mut [Pwm],
+    pwms: &mut [C],
     curves: &HashMap<String, PwmCurve>,
     for_each_update: &mut U
 ) -> Result<(), Vec<Box<dyn Error>>>
@@ -131,7 +131,7 @@ pub fn update_pwms<U>(
         errors.push(Box::new(e));
     }
 
-    for pwm in pwms {
+    for pwm in pwms.iter_mut().map(AsMut::as_mut) {
         let pwm_name = pwm.get_key();
         let curve = match curves.get(pwm_name) {
             None => continue,

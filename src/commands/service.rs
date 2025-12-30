@@ -4,7 +4,7 @@ use log::{error, info, warn};
 use simple_logger::init_with_env;
 use systemd_journal_logger::{connected_to_journal, JournalLog};
 
-use crate::{CONFIG_PATH, CURVES_FILE, DEFAULT_POLL_RATE, GlobalContext, POLL_ENV, controllers::{FanController as _, Pwm}, curves::{PwmCurve, update_pwms}, groupie::{QueryResult, query_sensors}};
+use crate::{CONFIG_PATH, CURVES_FILE, DEFAULT_POLL_RATE, GlobalContext, POLL_ENV, controllers::scan_all, curves::{PwmCurve, update_pwms}, groupie::{QueryResult, query_sensors}};
 
 fn reload_config() -> Result<HashMap<String, PwmCurve>, String> {
     let mut curves_file = Path::new(CONFIG_PATH).to_owned();
@@ -68,11 +68,11 @@ fn start_inner(context: GlobalContext) -> Result<(), String> {
     let mut fan_curves: HashMap<String, PwmCurve> = reload_config()?;
     
     let mut state = QueryResult::new();
-    let mut pwms;
+    let mut controllers;
     loop {
-        match Pwm::scan() {
+        match scan_all(&context) {
             Ok(p) => {
-                pwms = p;
+                controllers = p;
                 break;
             },
             Err(e) => error!("Failed to find PWM devices. Retrying in 1 second. Error {}", e)
@@ -80,7 +80,7 @@ fn start_inner(context: GlobalContext) -> Result<(), String> {
         sleep(Duration::from_secs(1));
     }
     'outer: loop {
-        for p in &mut pwms {
+        for p in &mut controllers {
             match p.set_auto(false).and_then(|_| p.write_value(p.get_max_value())) {
                 Ok(_) => { },
                 Err(e) => {
@@ -109,7 +109,7 @@ fn start_inner(context: GlobalContext) -> Result<(), String> {
             Ok(_) => { },
             Err(e) => warn!("Failed to query sensor state: {}", e)
         }
-        match update_pwms(&state, &mut pwms, &fan_curves, &mut |_| {}) {
+        match update_pwms(&state, &mut controllers, &fan_curves, &mut |_| {}) {
             Ok(_) => { },
             Err(errors) => {
                 // I would have preferred cleaner handling
@@ -126,20 +126,21 @@ fn start_inner(context: GlobalContext) -> Result<(), String> {
         }
         sleep(Duration::from_secs(poll_frequency));
     }
-    let mut pwms_to_automate = pwms;
-    let mut pwms_buffer = Vec::new(); // Expected state has 0 failures. Avoids allocation
+
+    let mut pwms_to_automate = controllers;
     let mut retries: u8 = MAX_AUTO_RETRIES_ON_EXIT;
     while !pwms_to_automate.is_empty() && retries > 0 {
-        for p in &mut pwms_to_automate {
+        let mut pwms_buffer = Vec::new(); // Expected state has 0 failures. Avoids allocation
+        for mut p in pwms_to_automate {
             match p.set_auto(true) {
                 Ok(_) => { },
                 Err(e) => {
                     error!("Failed to automate {}. {} retries left. Error: {}", p.get_key(), retries, e);
-                    pwms_buffer.push(p.clone()); // Not quite happy about this clone, but its effect should be minimal
+                    pwms_buffer.push(p); // Not quite happy about this clone, but its effect should be minimal
                 }
             }
         }
-        (pwms_to_automate, pwms_buffer) = (pwms_buffer, pwms_to_automate);
+        pwms_to_automate = pwms_buffer;
         retries -= 1;
     }
     Ok(())

@@ -6,6 +6,8 @@ use std::fmt::Display;
 
 pub use pwm::Pwm;
 
+use crate::GlobalContext;
+
 pub type Result<T> = std::result::Result<T, FanControlError>;
 
 pub trait FanController {
@@ -91,3 +93,25 @@ impl From<nvml_wrapper::error::NvmlError> for FanControlError {
         }
     }
 }
+
+#[cfg(not(feature = "nvml"))]
+#[allow(unused_variables)]
+pub fn scan_all(context: &GlobalContext) -> Result<Vec<Box<dyn FanController>>> {
+    Pwm::scan().map(|vec| vec.into_iter().map(Box::new).map(trait_coerce).collect())
+        .map_err(Into::into)
+}
+
+#[cfg(feature = "nvml")]
+pub fn scan_all<'a>(context: &'a GlobalContext) -> Result<Vec<Box<dyn FanController + 'a>>> {
+    use nvml::NVIDIAFanController;
+
+    let pwms = Pwm::scan()?;
+    let nvidia_fans: Vec<NVIDIAFanController> = NVIDIAFanController::scan(context.get_nvml())?;
+    Ok(
+        pwms.into_iter().map(Box::new).map(trait_coerce)
+            .chain(nvidia_fans.into_iter().map(Box::new).map(trait_coerce))
+            .collect()
+    )
+}
+
+fn trait_coerce<'b, T: FanController + 'b>(b: Box<T>) -> Box<dyn FanController + 'b> { b }

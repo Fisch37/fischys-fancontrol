@@ -45,7 +45,7 @@ fn clone_device<'nvml>(device: &Device<'nvml>) -> Result<Device<'nvml>, NvmlErro
 }
 
 /// NVML-controlled GPU fans.
-struct NVIDIAFanController<'nvml> {
+pub struct NVIDIAFanController<'nvml> {
     device: Device<'nvml>,
     fan_idx: u32,
     key: String
