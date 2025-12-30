@@ -1,16 +1,14 @@
-use std::{collections::HashMap, env, fmt::Write as _, fs, panic::catch_unwind, path::Path, sync::{atomic::{AtomicBool, Ordering}, Arc}, thread::sleep, time::Duration};
+use std::{collections::HashMap, env, fmt::Write as _, fs, ops::Deref as _, panic::catch_unwind, sync::{Arc, atomic::{AtomicBool, Ordering}}, thread::sleep, time::Duration};
 
 use log::{error, info, warn};
 use simple_logger::init_with_env;
 use systemd_journal_logger::{connected_to_journal, JournalLog};
 
-use crate::{CONFIG_PATH, CURVES_FILE, DEFAULT_POLL_RATE, GlobalContext, POLL_ENV, controllers::scan_all, curves::{PwmCurve, update_pwms}, groupie::{QueryResult, query_sensors}};
+use crate::{CONFIG_PATH, CURVES_PATH, DEFAULT_POLL_RATE, GlobalContext, POLL_ENV, controllers::{FanController, scan_all}, curves::{PwmCurve, update_pwms}, groupie::{QueryResult, query_sensors}, utils::return_to_auto};
 
 fn reload_config() -> Result<HashMap<String, PwmCurve>, String> {
-    let mut curves_file = Path::new(CONFIG_PATH).to_owned();
-    curves_file.push(CURVES_FILE);
-    if fs::exists(&curves_file).map_err(|_| "Could not check for curves file".to_string())? {
-        let file = fs::File::open(curves_file).map_err(|_| "Could not open curves file".to_string())?;
+    if fs::exists(CURVES_PATH.deref()).map_err(|_| "Could not check for curves file".to_string())? {
+        let file = fs::File::open(CURVES_PATH.deref()).map_err(|_| "Could not open curves file".to_string())?;
         match serde_json::from_reader::<_, HashMap<String, PwmCurve>>(&file) {
             Ok(mut x) => {
                 x.shrink_to_fit();
@@ -45,7 +43,24 @@ fn start_logger() -> Result<(), String> {
     })
 }
 
-const MAX_AUTO_RETRIES_ON_EXIT: u8 = 5;
+fn disable_auto_for_controlled<'a>(controllers: &mut [Box<dyn FanController + 'a>], fan_curves: &HashMap<String, PwmCurve>) {
+    'outer: loop {
+        // only set fans to manual that are controlled by the given fan curves
+        for p in controllers.iter_mut()
+            .filter(|p| fan_curves.contains_key(p.get_key()))
+        {
+            match p.set_auto(false).and_then(|_| p.write_value(p.get_max_value())) {
+                Ok(_) => { },
+                Err(e) => {
+                    warn!("Failed to set pwm {} to manual mode. Trying again. Error: {}", p.get_key(), e);
+                    continue 'outer;
+                }
+            }
+        }
+        break;
+    }
+}
+
 fn start_inner(context: GlobalContext) -> Result<(), String> {
     let must_reload_config = Arc::new(AtomicBool::new(false));
     match signal_hook::flag::register(signal_hook::consts::SIGHUP, must_reload_config.clone()) {
@@ -55,12 +70,15 @@ fn start_inner(context: GlobalContext) -> Result<(), String> {
     let must_exit = Arc::new(AtomicBool::new(false));
     match signal_hook::flag::register(signal_hook::consts::SIGTERM, must_exit.clone()) {
         Ok(_) => { },
-        Err(e) => error!("Failed to register signal handler for SIGTERM. Exit will not reset to PWM modes. Error {e}")
+        Err(e) => error!("Failed to register signal handler for SIGTERM. Exit will not reset to auto. Error {e}")
+    }
+    match signal_hook::flag::register(signal_hook::consts::SIGINT, must_exit.clone()) {
+        Ok(_) => { },
+        Err(e) => error!("Failed to register signal handler for SIGINT. Exit may not reset to auto. Error {e}")
     }
 
-    let config_dir = Path::new(CONFIG_PATH);
-    if !fs::exists(config_dir).unwrap_or(false) {
-        fs::create_dir(config_dir).map_err(|e| format!("Could not create config directory: {e}"))?;
+    if !fs::exists(CONFIG_PATH.deref()).unwrap_or(false) {
+        fs::create_dir(CONFIG_PATH.deref()).map_err(|e| format!("Could not create config directory: {e}"))?;
     }
     let poll_frequency = env::var(POLL_ENV)
         .map_or(DEFAULT_POLL_RATE, |v| v.parse().unwrap_or(DEFAULT_POLL_RATE));
@@ -79,18 +97,7 @@ fn start_inner(context: GlobalContext) -> Result<(), String> {
         }
         sleep(Duration::from_secs(1));
     }
-    'outer: loop {
-        for p in &mut controllers {
-            match p.set_auto(false).and_then(|_| p.write_value(p.get_max_value())) {
-                Ok(_) => { },
-                Err(e) => {
-                    warn!("Failed to set pwm {} to auto mode. Trying again. Error: {}", p.get_key(), e);
-                    continue 'outer;
-                }
-            }
-        }
-        break;
-    }
+    disable_auto_for_controlled(&mut controllers, &fan_curves);
     while !must_exit.load(Ordering::Relaxed) {
         // To be honest I am quite unsure of the Ordering contraints I chose here.
         // My rational is as follows: On a failure (no reload was requested), a signal handler may set the flag.
@@ -101,7 +108,12 @@ fn start_inner(context: GlobalContext) -> Result<(), String> {
         // My unsureness about this is slightly embarassing, as this was actually a topic in my last semester (which is only a few months ago)
         if must_reload_config.compare_exchange(true, false, Ordering::AcqRel,Ordering::Relaxed).is_ok() {
             match reload_config() {
-                Ok(f) => fan_curves = f,
+                Ok(f) => {
+                    fan_curves = f;
+                    // need to rerun this, because reload may have changed the affected fans
+                    return_to_auto(&mut controllers);
+                    disable_auto_for_controlled(&mut controllers, &fan_curves);
+                },
                 Err(_) => error!("Failed to reload config. Keeping old config just in case.")
             }
         }
@@ -127,25 +139,15 @@ fn start_inner(context: GlobalContext) -> Result<(), String> {
         sleep(Duration::from_secs(poll_frequency));
     }
 
-    let mut pwms_to_automate = controllers;
-    let mut retries: u8 = MAX_AUTO_RETRIES_ON_EXIT;
-    while !pwms_to_automate.is_empty() && retries > 0 {
-        let mut pwms_buffer = Vec::new(); // Expected state has 0 failures. Avoids allocation
-        for mut p in pwms_to_automate {
-            match p.set_auto(true) {
-                Ok(_) => { },
-                Err(e) => {
-                    error!("Failed to automate {}. {} retries left. Error: {}", p.get_key(), retries, e);
-                    pwms_buffer.push(p); // Not quite happy about this clone, but its effect should be minimal
-                }
-            }
-        }
-        pwms_to_automate = pwms_buffer;
-        retries -= 1;
+    let count_failed = return_to_auto(&mut controllers);
+    if count_failed > 0 {
+        warn!("Failed to return {count_failed} fans to auto mode")
     }
     Ok(())
 }
 
+// waiting before restart prevents consuming MASSIVE cpu when a permanent issue occurs (like broken config)
+const RESTART_WAIT: Duration = Duration::from_secs(2);
 pub fn start() {
     match start_logger() {
         Ok(_) => info!("Hello logging!"),
@@ -161,10 +163,13 @@ pub fn start() {
                 info!("Exited regularly");
                 break
             },
-            Ok(Err(e)) => error!("Service routine exited with an error. Restarting it. Error: {e}"),
+            Ok(Err(e)) => {
+                error!("Service routine exited with an error. Waiting for a while, then restarting it. Error: {e}");
+            },
             Err(_) => {
-                error!("Service panicked! Attempting to restart it!")
+                error!("Service panicked! Waiting a while, then attempting a restart.")
             }
         }
+        sleep(RESTART_WAIT);
     }
 }

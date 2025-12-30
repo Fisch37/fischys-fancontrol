@@ -2,7 +2,7 @@ use std::{iter::zip, thread::sleep, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{GlobalContext, controllers::{scan_all}, groupie::{QueryResult, SensorKind, query_sensors}};
+use crate::{GlobalContext, controllers::scan_all, groupie::{QueryResult, SensorKey as _, SensorKind, query_sensors}};
 
 #[derive(Serialize, Deserialize)]
 pub struct Pwm2Fan {
@@ -63,7 +63,10 @@ pub fn discover_pwm_fans(context: &GlobalContext) -> Result<Vec<Pwm2Fan>, Box<dy
         
         let mut str = String::new();
         for i in &affected_fans {
-            str += &fans[*i].name;
+            let (adapter_key, sensor_name) = &fans[*i].get_sensor_key();
+            str += adapter_key;
+            str += "/";
+            str += sensor_name;
             str += " ";
         }
         println!("{} affects {}", p.get_key(), str);

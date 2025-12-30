@@ -1,5 +1,9 @@
 use std::{error::Error, fmt::Display};
 
+use log::{debug, error};
+
+use crate::controllers::FanController;
+
 #[derive(Debug)]
 pub struct SimpleError {
     #[allow(unused)]
@@ -91,4 +95,25 @@ impl Default for ErrorGroup {
     fn default() -> Self {
         Self::new()
     }
+}
+
+const MAX_AUTO_RETRIES_ON_EXIT: u8 = 5;
+pub fn return_to_auto<'a>(controllers: &mut [Box<dyn FanController + 'a>]) -> usize {
+    let mut pwms_to_automate: Vec<&mut Box<_>> = controllers.iter_mut().collect();
+    let mut retries: u8 = MAX_AUTO_RETRIES_ON_EXIT;
+    while !pwms_to_automate.is_empty() && retries > 0 {
+        let mut pwms_buffer = Vec::new(); // Expected state has 0 failures. Avoids allocation
+        for p in pwms_to_automate {
+            match p.set_auto(true) {
+                Ok(_) => debug!("{} returned to auto", p.get_key()),
+                Err(e) => {
+                    error!("Failed to automate {}. {} retries left. Error: {}", p.get_key(), retries, e);
+                    pwms_buffer.push(p); // Not quite happy about this clone, but its effect should be minimal
+                }
+            }
+        }
+        pwms_to_automate = pwms_buffer;
+        retries -= 1;
+    }
+    return pwms_to_automate.len();
 }

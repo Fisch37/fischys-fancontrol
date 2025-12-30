@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt::Display, fs::File, io::{ErrorKind, stdout}, ops::Deref};
 
 
-use crate::{CHARACTERISTICS_PATH, GlobalContext, controllers::scan_all, fan_configuration::{FanProperties, detect_fan_properties}, fan_discovery::{Pwm2Fan, discover_pwm_fans}};
+use crate::{CHARACTERISTICS_PATH, GlobalContext, controllers::scan_all, fan_configuration::{FanProperties, detect_fan_properties}, fan_discovery::{Pwm2Fan, discover_pwm_fans}, utils::return_to_auto};
 
 type FanAssociations = Vec<Pwm2Fan>;
 enum FanAssociationError {
@@ -81,6 +81,11 @@ pub fn start() {
     match serde_json::to_writer_pretty(stdout(), &fan_characteristics) {
         Ok(_) => println!(),
         Err(e) => eprintln!("Failed to serialise fan characteristics: {e}")
+    }
+
+    let failed_auto = return_to_auto(&mut controllers);
+    if failed_auto > 0 {
+        eprintln!("Failed to return {failed_auto} PWMs to auto mode!");
     }
 }
 
