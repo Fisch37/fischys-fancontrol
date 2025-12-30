@@ -1,6 +1,6 @@
 use std::{collections::HashMap, error::Error, hash::Hash};
 
-use log::{debug, info, log_enabled, warn};
+use log::{info, log_enabled, warn};
 use serde_derive::{Deserialize, Serialize};
 
 use crate::{groupie::QueryResult, pwms::{FanController as _, Pwm}, utils::SimpleError};
@@ -64,10 +64,6 @@ impl Eq for SingleSensorControl { }
 impl PwmControl for SingleSensorControl {
     fn evaluate(&self, state: &QueryResult) -> Option<f64> {
         let temperatures = state.get_of_kind(crate::groupie::SensorKind::Temperature);
-        if log_enabled!(log::Level::Debug) {
-            debug!("{:#?}", temperatures);
-            debug!("{:?}", self);
-        }
         temperatures.get_from_parts(&self.adapter, &self.sensor)
             .map(|sensor| self.factor*sensor.input)
     }
