@@ -1,7 +1,9 @@
-use std::{collections::BTreeMap, fmt::Display, fs::File, io::{ErrorKind, stdout}, ops::Deref};
+use std::{collections::BTreeMap, fmt::Display, fs::File, io::{ErrorKind, stdout}, ops::Deref, thread::sleep, time::Duration};
 
 
 use crate::{CHARACTERISTICS_PATH, GlobalContext, controllers::scan_all, fan_configuration::{FanProperties, detect_fan_properties}, fan_discovery::{Pwm2Fan, discover_pwm_fans}, utils::return_to_auto};
+
+const SPINUP_TIME: Duration = Duration::from_secs(7);
 
 type FanAssociations = Vec<Pwm2Fan>;
 enum FanAssociationError {
@@ -21,7 +23,17 @@ impl Display for AssociationReadError {
     }
 }
 
-pub fn start() {
+#[derive(clap::Args)]
+pub struct CharacteristicsArgs {
+    /// Restricts which controllers to analyze.
+    /// If passed at least once, only the passed keys will be tracked.
+    /// Note: The grapher will run if at least one key matched.
+    ///  This means that if there are invalid keys in your list, they will be ignored!
+    #[arg(short, long)]
+    pub pwms: Vec<String>
+}
+
+pub fn start(args: CharacteristicsArgs) {
     let context = GlobalContext::init().unwrap();
     let associations = match try_read_discovery() {
         Ok(x) => x,
@@ -45,10 +57,27 @@ pub fn start() {
     };
 
     let mut controllers = scan_all(&context).unwrap();
+    // If pwms arg is used, only track those pwms
+    if !args.pwms.is_empty() {
+        // TODO: This is O(n*m). Investigate whether a faster option exists
+        controllers.retain(|c| args.pwms.iter().any(|s| s == c.get_key()));
+        if controllers.is_empty() {
+            eprintln!("No controllers match the specified keys!");
+            return;
+        } else {
+            eprint!("Testing ");
+            for c in &controllers {
+                eprint!("{} ", c.get_key());
+            }
+            eprintln!();
+        }
+    }
     for pwm in &mut controllers {
         pwm.set_auto(false).unwrap();
         pwm.write_value(pwm.get_max_value()).unwrap();
     }
+    eprintln!("Waiting to spin up the fans");
+    sleep(SPINUP_TIME);
 
     let mut fan_characteristics: BTreeMap<&str, Vec<FanProperties>> = BTreeMap::new();
     let mut is_partial = false;

@@ -1,7 +1,10 @@
 use std::path::{Path, PathBuf};
 
+use clap::Parser;
 use lazy_static::lazy_static;
 use log::warn;
+
+use crate::commands::characteristics::CharacteristicsArgs;
 
 pub mod fan_configuration;
 pub mod fan_discovery;
@@ -61,12 +64,17 @@ impl GlobalContext {
     }
 }
 
+#[derive(clap::Parser)]
+pub enum CmdArgs {
+    Service,
+    ListSensors,
+    Characteristics(CharacteristicsArgs),
+}
+
 fn main() {
-    let subcommand = std::env::args().nth(1).unwrap_or_default();
-    match subcommand.as_str() {
-        "service" => commands::service::start(),
-        "list-sensors" => commands::list_sensors::start(),
-        "characteristics" => commands::characteristics::start(),
-        _ => println!("Unknown subcommand {}", subcommand)
+    match CmdArgs::parse() {
+        CmdArgs::Service => commands::service::start(),
+        CmdArgs::ListSensors => commands::list_sensors::start(),
+        CmdArgs::Characteristics(args) => commands::characteristics::start(args),
     }
 }
