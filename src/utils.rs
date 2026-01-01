@@ -1,6 +1,6 @@
-use std::{error::Error, fmt::Display};
+use std::{error::Error, fmt::Display, ops::{Deref, DerefMut}};
 
-use log::{debug, error};
+use log::{debug, error, warn};
 
 use crate::controllers::FanController;
 
@@ -108,12 +108,53 @@ pub fn return_to_auto<'a>(controllers: &mut [Box<dyn FanController + 'a>]) -> us
                 Ok(_) => debug!("{} returned to auto", p.get_key()),
                 Err(e) => {
                     error!("Failed to automate {}. {} retries left. Error: {}", p.get_key(), retries, e);
-                    pwms_buffer.push(p); // Not quite happy about this clone, but its effect should be minimal
+                    pwms_buffer.push(p);
                 }
             }
         }
         pwms_to_automate = pwms_buffer;
         retries -= 1;
     }
-    return pwms_to_automate.len();
+    pwms_to_automate.len()
+}
+
+/// This struct is a guard around multiple controllers, that tries to return those controllers to automatic,
+/// when it leaves scope. Note that since this uses the [`Drop`] trait, 
+/// there is no guarantee that all controllers successfully enter automatic mode.
+/// 
+/// This struct also implements [`Deref`] and [`DerefMut`] so that access to the contained values is still possible.
+pub struct ReturnToAutoWrapper<'a, 'b>
+{
+    controllers: &'b mut [Box<dyn FanController + 'a>]
+}
+impl<'a, 'b> ReturnToAutoWrapper<'a, 'b>
+{
+    pub fn new(controllers: &'b mut [Box<dyn FanController + 'a>]) -> Self {
+        Self { controllers }
+    }
+}
+impl<'a, 'b> From<&'b mut [Box<dyn FanController + 'a>]> for ReturnToAutoWrapper<'a, 'b> {
+    fn from(value: &'b mut [Box<dyn FanController + 'a>]) -> Self {
+        Self::new(value)
+    }
+}
+impl<'a, 'b> Deref for ReturnToAutoWrapper<'a, 'b> {
+    type Target = [Box<dyn FanController + 'a>];
+
+    fn deref(&self) -> &Self::Target {
+        self.controllers
+    }
+}
+impl<'a, 'b> DerefMut for ReturnToAutoWrapper<'a, 'b> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.controllers
+    }
+}
+impl<'a, 'b> Drop for ReturnToAutoWrapper<'a, 'b> {
+    fn drop(&mut self) {
+        let failed_count = return_to_auto(self.controllers);
+        if failed_count > 0 {
+            warn!("Failed to return {failed_count} fan controllers to auto mode!")
+        }
+    }
 }

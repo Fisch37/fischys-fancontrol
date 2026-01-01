@@ -1,26 +1,71 @@
-use std::{collections::HashMap, env, fmt::Write as _, fs, ops::Deref as _, panic::catch_unwind, sync::{Arc, atomic::{AtomicBool, Ordering}}, thread::sleep, time::Duration};
+use std::{collections::HashMap, env, error::Error as StdError, fmt::{Display, Write as _}, fs, io::ErrorKind as IOErrorKind, ops::Deref as _, panic::catch_unwind, sync::{Arc, atomic::{AtomicBool, Ordering}}, thread::sleep, time::Duration};
 
 use log::{error, info, warn};
+use signal_hook::{consts::signal, iterator::Signals};
 use simple_logger::init_with_env;
 use systemd_journal_logger::{connected_to_journal, JournalLog};
 
-use crate::{CONFIG_PATH, CURVES_PATH, DEFAULT_POLL_RATE, GlobalContext, POLL_ENV, controllers::{FanController, scan_all}, curves::{PwmCurve, update_pwms}, groupie::{QueryResult, query_sensors}, utils::return_to_auto};
+use crate::{CONFIG_PATH, CURVES_PATH, DEFAULT_POLL_RATE, GlobalContext, POLL_ENV, controllers::{FanController, scan_all}, curves::{PwmCurve, update_pwms}, groupie::{QueryResult, query_sensors}, utils::{ReturnToAutoWrapper, return_to_auto}};
 
-fn reload_config() -> Result<HashMap<String, PwmCurve>, String> {
-    if fs::exists(CURVES_PATH.deref()).map_err(|_| "Could not check for curves file".to_string())? {
-        let file = fs::File::open(CURVES_PATH.deref()).map_err(|_| "Could not open curves file".to_string())?;
-        match serde_json::from_reader::<_, HashMap<String, PwmCurve>>(&file) {
-            Ok(mut x) => {
-                x.shrink_to_fit();
-                Ok(x)
-            },
-            Err(e) => Err(format!("Could not parse curves file {e}"))
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum ServiceErrorKind {
+    Recoverable,
+    NeedsIntervention
+}
+#[derive(Debug)]
+struct ServiceError {
+    error: Box<dyn StdError>,
+    context: Option<&'static str>,
+    kind: ServiceErrorKind
+}
+impl ServiceError {
+    #[inline]
+    fn new<E: StdError + 'static>(kind: ServiceErrorKind, context: Option<&'static str>, e: E) -> Self {
+        ServiceError {
+            error: Box::new(e),
+            context,
+            kind
         }
-    } else {
-        error!("Fan curves file does not exist. Please run setup");
-        Err("Fan curves file does not exist. Please run setup".to_string())
+    }
+
+    #[inline]
+    pub fn with_context<E: StdError + 'static>(kind: ServiceErrorKind, context: &'static str, e: E) -> Self {
+        Self::new(kind, Some(context), e)
+    }
+
+    // I'm sure I'll need these eventually
+    #[allow(dead_code)]
+    pub fn recoverable<E: StdError + 'static>(e: E) -> Self {
+        Self::new(ServiceErrorKind::Recoverable, None, e)
+    }
+
+    #[allow(dead_code)]
+    pub fn recoverable_ctx<E: StdError + 'static>(context: &'static str, e: E) -> Self {
+        Self::with_context(ServiceErrorKind::Recoverable, context, e)
+    }
+
+    #[allow(dead_code)]
+    pub fn needs_intervention<E: StdError + 'static>(e: E) -> ServiceError {
+        Self::new(ServiceErrorKind::NeedsIntervention, None, e)
+    }
+
+    pub fn needs_intervention_ctx<E: StdError + 'static>(context: &'static str, e: E) -> Self {
+        Self::with_context(ServiceErrorKind::NeedsIntervention, context, e)
+    }
+
+    pub fn kind(&self) -> ServiceErrorKind {
+        self.kind
     }
 }
+impl Display for ServiceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.context {
+            None => write!(f, "{}", self.error),
+            Some(context) => write!(f, "{context}: {}", self.error)
+        }
+    }
+}
+impl StdError for ServiceError { }
 
 fn start_logger() -> Result<(), String> {
     {
@@ -43,6 +88,29 @@ fn start_logger() -> Result<(), String> {
     })
 }
 
+fn reload_config() -> Result<HashMap<String, PwmCurve>, ServiceError> {
+    let file = fs::File::open(CURVES_PATH.deref())
+        .map_err(|e| {
+            ServiceError::with_context(
+                match e.kind() {
+                    IOErrorKind::NotFound => {
+                        error!("Fan curves file does not exist. Please run setup");
+                        ServiceErrorKind::NeedsIntervention
+                    },
+                    IOErrorKind::PermissionDenied => ServiceErrorKind::NeedsIntervention,
+                    _ => ServiceErrorKind::Recoverable  // assume recoverable, because of spurious I/O errors
+                },
+                "Could not open config file", e
+            )
+        })?;
+    serde_json::from_reader::<_, HashMap<String, PwmCurve>>(&file)
+        .map(|mut x| {
+            x.shrink_to_fit();
+            x
+        })
+        .map_err(|e| ServiceError::needs_intervention_ctx("Failed to parse config file", e))
+}
+
 fn disable_auto_for_controlled<'a>(controllers: &mut [Box<dyn FanController + 'a>], fan_curves: &HashMap<String, PwmCurve>) {
     'outer: loop {
         // only set fans to manual that are controlled by the given fan curves
@@ -61,7 +129,7 @@ fn disable_auto_for_controlled<'a>(controllers: &mut [Box<dyn FanController + 'a
     }
 }
 
-fn start_inner(context: GlobalContext) -> Result<(), String> {
+fn start_inner(context: GlobalContext) -> Result<(), ServiceError> {
     let must_reload_config = Arc::new(AtomicBool::new(false));
     match signal_hook::flag::register(signal_hook::consts::SIGHUP, must_reload_config.clone()) {
         Ok(_) => { },
@@ -78,7 +146,8 @@ fn start_inner(context: GlobalContext) -> Result<(), String> {
     }
 
     if !fs::exists(CONFIG_PATH.deref()).unwrap_or(false) {
-        fs::create_dir(CONFIG_PATH.deref()).map_err(|e| format!("Could not create config directory: {e}"))?;
+        fs::create_dir(CONFIG_PATH.deref())
+            .map_err(|e| ServiceError::needs_intervention_ctx("Could not create config directory", e))?;
     }
     let poll_frequency = env::var(POLL_ENV)
         .map_or(DEFAULT_POLL_RATE, |v| v.parse().unwrap_or(DEFAULT_POLL_RATE));
@@ -97,51 +166,44 @@ fn start_inner(context: GlobalContext) -> Result<(), String> {
         }
         sleep(Duration::from_secs(1));
     }
-    disable_auto_for_controlled(&mut controllers, &fan_curves);
-    while !must_exit.load(Ordering::Relaxed) {
-        // To be honest I am quite unsure of the Ordering contraints I chose here.
-        // My rational is as follows: On a failure (no reload was requested), a signal handler may set the flag.
-        // This is fine, as then I shall simply perform the reload during the next iteration.
-        // On a success, things must be more stringent. I must never miss a signal handler, therefore I should enforce the strongest possible Ordering.
-        // The strongest possible ordering is Acquire-Release, so I chose it.
-        // (an Errored compare_exhange operation [.is_ok() == false] is ignored here, since we can just retry next iteration)
-        // My unsureness about this is slightly embarassing, as this was actually a topic in my last semester (which is only a few months ago)
-        if must_reload_config.compare_exchange(true, false, Ordering::AcqRel,Ordering::Relaxed).is_ok() {
-            match reload_config() {
-                Ok(f) => {
-                    fan_curves = f;
-                    // need to rerun this, because reload may have changed the affected fans
-                    return_to_auto(&mut controllers);
-                    disable_auto_for_controlled(&mut controllers, &fan_curves);
-                },
-                Err(_) => error!("Failed to reload config. Keeping old config just in case.")
+    {
+        let mut controllers_wrapped = ReturnToAutoWrapper::new(&mut controllers);
+        disable_auto_for_controlled(&mut controllers_wrapped, &fan_curves);
+        while !must_exit.load(Ordering::Relaxed) {
+            // To be honest I am quite unsure of the Ordering contraints I chose here.
+            // My rational is as follows: On a failure (no reload was requested), a signal handler may set the flag.
+            // This is fine, as then I shall simply perform the reload during the next iteration.
+            // On a success, things must be more stringent. I must never miss a signal handler, therefore I should enforce the strongest possible Ordering.
+            // The strongest possible ordering is Acquire-Release, so I chose it.
+            // (an Errored compare_exhange operation [.is_ok() == false] is ignored here, since we can just retry next iteration)
+            // My unsureness about this is slightly embarassing, as this was actually a topic in my last semester (which is only a few months ago)
+            if must_reload_config.compare_exchange(true, false, Ordering::AcqRel,Ordering::Relaxed).is_ok() {
+                fan_curves = reload_config()?;
+                // TODO: Add some system to determine which fans need to be dropped...
+                return_to_auto(&mut controllers_wrapped);
+                disable_auto_for_controlled(&mut controllers_wrapped, &fan_curves);
             }
-        }
-        match query_sensors(&mut state, &context) {
-            Ok(_) => { },
-            Err(e) => warn!("Failed to query sensor state: {}", e)
-        }
-        match update_pwms(&state, &mut controllers, &fan_curves, &mut |_| {}) {
-            Ok(_) => { },
-            Err(errors) => {
-                // I would have preferred cleaner handling
-                let mut output = "[".to_owned();
-                for e in errors {
-                    match write!(&mut output, "{},", e) {
-                        Ok(_) => { },
-                        Err(_) => output += &e.to_string(),  // Good enough (I don't think this is ever called)
+            match query_sensors(&mut state, &context) {
+                Ok(_) => { },
+                Err(e) => warn!("Failed to query sensor state: {}", e)
+            }
+            match update_pwms(&state, &mut controllers_wrapped, &fan_curves, &mut |_| {}) {
+                Ok(_) => { },
+                Err(errors) => {
+                    // I would have preferred cleaner handling
+                    let mut output = "[".to_owned();
+                    for e in errors {
+                        match write!(&mut output, "{},", e) {
+                            Ok(_) => { },
+                            Err(_) => output += &e.to_string(),  // Good enough (I don't think this is ever called)
+                        }
                     }
+                    output.push(']');
+                    error!("One or more fan adjustments failed: {}", output)
                 }
-                output.push(']');
-                error!("One or more fan adjustments failed: {}", output)
             }
+            sleep(Duration::from_secs(poll_frequency));
         }
-        sleep(Duration::from_secs(poll_frequency));
-    }
-
-    let count_failed = return_to_auto(&mut controllers);
-    if count_failed > 0 {
-        warn!("Failed to return {count_failed} fans to auto mode")
     }
     Ok(())
 }
@@ -164,12 +226,35 @@ pub fn start() {
                 break
             },
             Ok(Err(e)) => {
-                error!("Service routine exited with an error. Waiting for a while, then restarting it. Error: {e}");
+                match e.kind() {
+                    ServiceErrorKind::Recoverable => {
+                        error!("Service routine exited with an error. Waiting for a while, then restarting it. Error: {e}");
+                        sleep(RESTART_WAIT);
+                    },
+                    ServiceErrorKind::NeedsIntervention => {
+                        error!("Encountered an error that needs manual intervention. Waiting on reload.\nError: {e}");
+                        let mut hup_listener = Signals::new([signal::SIGHUP, signal::SIGINT, signal::SIGTERM])
+                            .expect("Can't register SIGHUP, SIGINT, SIGTERM handler for reload guard!");
+                        // Wait for next SIGHUP to continue
+                        match hup_listener.pending()
+                            .chain(hup_listener.forever())
+                            .next()
+                        {
+                            Some(signal::SIGHUP) => { },
+                            Some(signal::SIGINT | signal::SIGTERM) => {
+                                info!("Received exit signal while waiting on SIGHUP. Exiting normally");
+                                break
+                            },
+                            Some(sig) => warn!("Received unexpected signal {sig}. Wtf?"),
+                            None => warn!("Somehow exited signal listener without receiving a signal. Something is off here...")
+                        }
+                    }
+                }
             },
             Err(_) => {
-                error!("Service panicked! Waiting a while, then attempting a restart.")
+                error!("Service panicked! Waiting a while, then attempting a restart.");
+                sleep(RESTART_WAIT);
             }
         }
-        sleep(RESTART_WAIT);
     }
 }
