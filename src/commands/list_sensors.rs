@@ -18,7 +18,7 @@ pub fn start() {
     let mut state = QueryResult::new();
     query_sensors(&mut state, &context).unwrap();
     for kind in SensorKind::iter() {
-        println!("{:?}:", kind);
+        println!("{kind}:");
         let mut last_adapter = None;
         for sensor in state.get_of_kind(kind).deref() {
             if Some(&*sensor.adapter) != last_adapter {
@@ -30,5 +30,6 @@ pub fn start() {
             );
             last_adapter = Some(&*sensor.adapter);
         }
+        println!();
     }
 }

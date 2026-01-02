@@ -1,5 +1,6 @@
-use std::{borrow::Borrow, cmp::Ordering, error::Error, hash::Hash, ops::{Deref, Index}, rc::Rc, slice::SliceIndex};
+use std::{borrow::Borrow, cmp::Ordering, error::Error, fmt::Display, hash::Hash, ops::{Deref, Index}, rc::Rc, slice::SliceIndex};
 
+use serde::{Deserialize, Serialize};
 use strum::{EnumCount, EnumIter};
 
 use crate::GlobalContext;
@@ -105,6 +106,8 @@ impl SensorData {
 #[derive(Debug, Clone, Copy, Hash)]
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 #[derive(EnumCount, EnumIter)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SensorKind {
     Temperature, Fan, Voltmeter, Beep
 }
@@ -121,6 +124,11 @@ impl SensorKind {
         } else {
             None
         }
+    }
+}
+impl Display for SensorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
     }
 }
 
