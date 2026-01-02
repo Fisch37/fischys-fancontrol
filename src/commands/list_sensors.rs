@@ -6,10 +6,12 @@ use crate::{GlobalContext, groupie::{QueryResult, SensorKind, query_sensors}};
 
 fn format_input(kind: SensorKind, input: f64) -> String {
     match kind {
-        SensorKind::Temperature => format!("{:>2.1}°C", input),
-        SensorKind::Fan => format!("{:>4.0} RPM", input),
-        SensorKind::Voltmeter => format!("{:.3}V", input),
-        SensorKind::Beep => (if input > 0.0 { "true" } else { "false" }).to_string()
+        SensorKind::Temperature => format!("{input:>2.1}°C"),
+        SensorKind::Fan => format!("{input:>4.0} RPM"),
+        SensorKind::Beep => (if input > 0.0 { "true" } else { "false" }).to_string(),
+        SensorKind::Power => format!("{input:.2}W"),
+        SensorKind::Voltmeter => format!("{input:.3}V"),
+        SensorKind::Current => format!("{input:.3}A"),
     }
 }
 

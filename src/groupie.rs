@@ -109,22 +109,12 @@ impl SensorData {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SensorKind {
-    Temperature, Fan, Voltmeter, Beep
-}
-impl SensorKind {
-    pub fn from_string(name: &str) -> Option<SensorKind> {
-        if name.starts_with("temp") {
-            Some(SensorKind::Temperature)
-        } else if name.starts_with("fan") {
-            Some(SensorKind::Fan)
-        } else if name.starts_with("in") {
-            Some(SensorKind::Voltmeter)
-        } else if name.starts_with("beep") {
-            Some(SensorKind::Beep)
-        } else {
-            None
-        }
-    }
+    Temperature,
+    Fan,
+    Beep,
+    Power,
+    Voltmeter,
+    Current,
 }
 impl Display for SensorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

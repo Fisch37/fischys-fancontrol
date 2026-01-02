@@ -1,5 +1,5 @@
 use std::{error::Error, process::Command, rc::Rc};
-use log::{debug, log_enabled};
+use log::{debug, log_enabled, warn};
 
 use crate::utils::{ExitStatusError, MalformedDataError};
 
@@ -7,6 +7,22 @@ use super::{QueryResult, SensorData, Adapter, SensorKind};
 
 fn malformed_data_error<T>(message: &str) -> Result<T, Box<dyn Error>> {
     Err(Box::new(MalformedDataError::new(message)))
+}
+
+/// Determines the kind of a sensor from its name (name is similar to "temp1", "temp12", or "beep")
+pub fn from_lm_sensors_name(name: &str) -> Option<SensorKind> {
+    let kind = name.trim_end_matches(|c: char| !c.is_alphabetic());
+    if kind == "temp" {
+        Some(SensorKind::Temperature)
+    } else if kind == "fan" {
+        Some(SensorKind::Fan)
+    } else if kind == "in" {
+        Some(SensorKind::Voltmeter)
+    } else if kind == "beep" {
+        Some(SensorKind::Beep)
+    } else {
+        None
+    }
 }
 
 pub fn query_sensors(state: &mut QueryResult) -> Result<(), Box<dyn Error>> {
@@ -60,7 +76,7 @@ pub fn query_sensors(state: &mut QueryResult) -> Result<(), Box<dyn Error>> {
 
                 let mut key_parts = key.split('_');
                 match key_parts.next() {
-                    Some(x) => kind = kind.or(SensorKind::from_string(x)),
+                    Some(x) => kind = kind.or(from_lm_sensors_name(x)),
                     None => return malformed_data_error("Empty sensor key")
                 }
                 match key_parts.next() {
@@ -76,7 +92,7 @@ pub fn query_sensors(state: &mut QueryResult) -> Result<(), Box<dyn Error>> {
                 }
             }
             match kind {
-                None => return Err(Box::new(MalformedDataError::new_with_string(format!("Unknown sensor kind for sensor {}/{}", &sensor.adapter.key, &sensor.name)))),
+                None => warn!("Skipping unknown sensor of unknown kind {}/{}", sensor.adapter.key, sensor.name),
                 Some(k) => {
                     sensor.kind = k;
                     state.add(sensor)

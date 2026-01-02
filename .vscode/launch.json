@@ -7,7 +7,7 @@
         // c.f. https://github.com/vadimcn/codelldb/blob/master/MANUAL.md#remote-debugging
         //      https://github.com/vadimcn/codelldb/blob/master/MANUAL.md#debugging-as-a-different-user
         {
-            "name": "Remote launch",
+            "name": "Service",
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceFolder}/target/debug/fischys-fancontrol", // Local path.
@@ -20,13 +20,5 @@
                 "RUST_LOG": "info"
             }
         },
-        
-
-        {
-            "type": "bashdb",
-            "request": "launch",
-            "name": "Bash-Debug (simplest configuration)",
-            "program": "${file}",
-        }
     ]
 }
