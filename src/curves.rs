@@ -3,7 +3,7 @@ use std::{collections::HashMap, error::Error, hash::Hash};
 use log::{info, log_enabled, warn};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{controllers::FanController, groupie::QueryResult, utils::SimpleError};
+use crate::{controllers::FanController, groupie::{QueryResult, SensorKind}, utils::SimpleError};
 
 fn f64_avg<I: IntoIterator<Item = f64>>(iterator: I) -> f64 {
     let mut sum: f64 = 0.0;
@@ -25,16 +25,19 @@ fn f64_median<I: IntoIterator<Item = f64>>(iterator: I) -> Option<f64> {
     }
     values.sort_by(f64::total_cmp);
     let middle = values.len()/2;
-    Some(if values.len() % 2 == 0 {
-        (values[middle] + values[middle+1]) / 2.0
-    } else {
-        values[middle + 1]
-    })
+    Some(
+        if values.len() % 2 == 0 {
+            (values[middle] + values[middle+1]) / 2.0
+        } else {
+            values[middle + 1]
+        }
+    )
 }
 
-fn f64_1() -> f64 { 1.0 }
+const fn f64_1() -> f64 { 1.0 }
+const fn default_sensor_kind() -> SensorKind { SensorKind::Temperature }
+const fn default_curve_mode() -> CurveMode { CurveMode::LinearInterpolation }
 
-#[typetag::serde(tag = "type")]
 trait PwmControl : std::fmt::Debug {
     fn evaluate(&self, state: &QueryResult) -> Option<f64>;
 }
@@ -45,7 +48,9 @@ pub struct SingleSensorControl {
     pub adapter: String,
     pub sensor: String,
     #[serde(default = "f64_1")]
-    pub factor: f64
+    pub factor: f64,
+    #[serde(default = "default_sensor_kind")]
+    pub sensor_kind: SensorKind
 }
 impl Hash for SingleSensorControl {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -60,11 +65,10 @@ impl PartialEq for SingleSensorControl {
     }
 }
 impl Eq for SingleSensorControl { }
-#[typetag::serde(name = "single")]
 impl PwmControl for SingleSensorControl {
     fn evaluate(&self, state: &QueryResult) -> Option<f64> {
-        let temperatures = state.get_of_kind(crate::groupie::SensorKind::Temperature);
-        temperatures.get_from_parts(&self.adapter, &self.sensor)
+        let sensors = state.get_of_kind(self.sensor_kind);
+        sensors.get_from_parts(&self.adapter, &self.sensor)
             .map(|sensor| self.factor*sensor.input)
     }
 }
@@ -72,7 +76,7 @@ impl PwmControl for SingleSensorControl {
 #[derive(Serialize, Deserialize)]
 #[derive(Debug)]
 pub struct MultiSensorControl {
-    pub sensors: Vec<SingleSensorControl>,
+    pub sensors: Vec<SensorControl>,
     pub operation: SensorMergeOperation
 }
 #[derive(Serialize, Deserialize)]
@@ -80,7 +84,6 @@ pub struct MultiSensorControl {
 pub enum SensorMergeOperation {
     MIN, MAX, AVERAGE, MEDIAN
 }
-#[typetag::serde(name = "multi")]
 impl PwmControl for MultiSensorControl {
     fn evaluate(&self, state: &QueryResult) -> Option<f64> {
         let chosen_sensors = self.sensors.iter()
@@ -96,9 +99,28 @@ impl PwmControl for MultiSensorControl {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[derive(Debug)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum SensorControl {
+    Single(SingleSensorControl),
+    Multi(MultiSensorControl),
+    Literal { value: f64 }
+}
+impl PwmControl for SensorControl {
+    fn evaluate(&self,state: &QueryResult) -> Option<f64>  {
+        match self {
+            Self::Single(x) => x.evaluate(state),
+            Self::Multi(x) => x.evaluate(state),
+            Self::Literal { value } => Some(*value)
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PwmCurve {
-    input_sensors: Box<dyn PwmControl>,
+    input_sensors: SensorControl,
+    #[serde(default = "default_curve_mode")]
     mode: CurveMode,
     points: Vec<(f64, f64)>,
     min: f64,
@@ -108,12 +130,16 @@ pub struct PwmCurve {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CurveMode {
-    LinearInterpolation
+    LinearInterpolation,
+    SnapLow,
+    SnapHigh
 }
 impl CurveMode {
     pub fn interpolate(self, x: f64, low: (f64, f64), high: (f64, f64)) -> f64 {
         match self {
             Self::LinearInterpolation => low.1 + (x - low.0)*(high.1 - low.1)/(high.0 - low.0),
+            Self::SnapLow => low.1,
+            Self::SnapHigh => high.1
         }
     }
 }
