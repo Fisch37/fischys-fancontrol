@@ -207,12 +207,9 @@ pub fn update_pwms<'a, U, C: AsMut<dyn FanController + 'a>>(
         if log_enabled!(log::Level::Info) {
             info!("{}: {:.1}°C (li {:?}; hi {:?}) -> {}", pwm_name, combined_temp, low_index, high_index, pwm_value);
         }
-        match pwm.write_value(pwm_value) {
-            Ok(_) => {},
-            Err(e) => {
-                warn!("Failed to set pwm for {}: {}", pwm.get_key(), e);
-                push_err(&mut errors, e);
-            }
+        if let Err(e) = pwm.write_value(pwm_value) {
+            warn!("Failed to set pwm for {}: {}", pwm.get_key(), e);
+            push_err(&mut errors, e);
         }
     }
 

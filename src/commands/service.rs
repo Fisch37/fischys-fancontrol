@@ -117,12 +117,9 @@ fn disable_auto_for_controlled<'a>(controllers: &mut [Box<dyn FanController + 'a
         for p in controllers.iter_mut()
             .filter(|p| fan_curves.contains_key(p.get_key()))
         {
-            match p.set_auto(false).and_then(|_| p.write_value(p.get_max_value())) {
-                Ok(_) => { },
-                Err(e) => {
-                    warn!("Failed to set pwm {} to manual mode. Trying again. Error: {}", p.get_key(), e);
-                    continue 'outer;
-                }
+            if let Err(e) = p.set_auto(false).and_then(|_| p.write_value(p.get_max_value())) {
+                warn!("Failed to set pwm {} to manual mode. Trying again. Error: {}", p.get_key(), e);
+                continue 'outer;
             }
         }
         break;
@@ -131,18 +128,15 @@ fn disable_auto_for_controlled<'a>(controllers: &mut [Box<dyn FanController + 'a
 
 fn start_inner(context: GlobalContext) -> Result<(), ServiceError> {
     let must_reload_config = Arc::new(AtomicBool::new(false));
-    match signal_hook::flag::register(signal_hook::consts::SIGHUP, must_reload_config.clone()) {
-        Ok(_) => { },
-        Err(e) => error!("Failed to register signal handler for SIGHUP. Config cannot reload. Error {e}")
+    if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGHUP, must_reload_config.clone()) {
+        error!("Failed to register signal handler for SIGHUP. Config cannot reload. Error {e}")
     }
     let must_exit = Arc::new(AtomicBool::new(false));
-    match signal_hook::flag::register(signal_hook::consts::SIGTERM, must_exit.clone()) {
-        Ok(_) => { },
-        Err(e) => error!("Failed to register signal handler for SIGTERM. Exit will not reset to auto. Error {e}")
+    if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGTERM, must_exit.clone()) {
+        error!("Failed to register signal handler for SIGTERM. Exit will not reset to auto. Error {e}")
     }
-    match signal_hook::flag::register(signal_hook::consts::SIGINT, must_exit.clone()) {
-        Ok(_) => { },
-        Err(e) => error!("Failed to register signal handler for SIGINT. Exit may not reset to auto. Error {e}")
+    if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGINT, must_exit.clone()) {
+        error!("Failed to register signal handler for SIGINT. Exit may not reset to auto. Error {e}")
     }
 
     if !fs::exists(CONFIG_PATH.deref()).unwrap_or(false) {
@@ -183,24 +177,19 @@ fn start_inner(context: GlobalContext) -> Result<(), ServiceError> {
                 return_to_auto(&mut controllers_wrapped);
                 disable_auto_for_controlled(&mut controllers_wrapped, &fan_curves);
             }
-            match query_sensors(&mut state, &context) {
-                Ok(_) => { },
-                Err(e) => warn!("Failed to query sensor state: {}", e)
+            if let Err(e) = query_sensors(&mut state, &context) {
+                warn!("Failed to query sensor state: {}", e)
             }
-            match update_pwms(&state, &mut controllers_wrapped, &fan_curves, &mut |_| {}) {
-                Ok(_) => { },
-                Err(errors) => {
-                    // I would have preferred cleaner handling
-                    let mut output = "[".to_owned();
-                    for e in errors {
-                        match write!(&mut output, "{},", e) {
-                            Ok(_) => { },
-                            Err(_) => output += &e.to_string(),  // Good enough (I don't think this is ever called)
-                        }
+            if let Err(errors) = update_pwms(&state, &mut controllers_wrapped, &fan_curves, &mut |_| {}) {
+                // I would have preferred cleaner handling
+                let mut output = "[".to_owned();
+                for e in errors {
+                    if write!(&mut output, "{},", e).is_err() {
+                        output += &e.to_string()  // Good enough (I don't think this is ever called)
                     }
-                    output.push(']');
-                    error!("One or more fan adjustments failed: {}", output)
                 }
+                output.push(']');
+                error!("One or more fan adjustments failed: {}", output)
             }
             sleep(Duration::from_secs(poll_frequency));
         }

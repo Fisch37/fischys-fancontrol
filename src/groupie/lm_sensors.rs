@@ -79,10 +79,8 @@ pub fn query_sensors(state: &mut QueryResult) -> Result<(), Box<dyn Error>> {
                 None => return Err(Box::new(MalformedDataError::new_with_string(format!("Unknown sensor kind for sensor {}/{}", &sensor.adapter.key, &sensor.name)))),
                 Some(k) => {
                     sensor.kind = k;
-                    match state.add(sensor) {
-                        Ok(_) => { },
-                        Err(sensor) => return Err(Box::new(MalformedDataError::new_with_string(format!("Duplicate sensor {}/{}", sensor.adapter.key, sensor.name))))
-                    }
+                    state.add(sensor)
+                        .map_err(|sensor| Box::new(MalformedDataError::new_with_string(format!("Duplicate sensor {}/{}", sensor.adapter.key, sensor.name))))?
                 }
             }
         }
