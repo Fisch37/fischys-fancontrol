@@ -146,7 +146,7 @@ pub fn update_pwms<'a, U, C: AsMut<dyn FanController + 'a>>(
         };
         // Find lower end interpolation point (or None if combined_temp < the lowest point)
         let low_index: Option<usize> = curve.points.iter().enumerate()
-            .rfind(|(_, (point, _))| *point < combined_temp)
+            .rfind(|(_, (point, _))| *point <= combined_temp)
             .map(|(i, _)| i);
         // for (i, (point, _)) in curve.points.iter().enumerate() {
         //     if combined_temp < *point {
