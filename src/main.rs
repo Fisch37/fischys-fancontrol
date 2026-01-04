@@ -8,6 +8,8 @@ use crate::commands::characteristics::CharacteristicsArgs;
 
 pub mod fan_configuration;
 pub mod fan_discovery;
+#[cfg(feature = "libsensors")]
+pub mod libsensors;
 pub mod groupie;
 pub mod controllers;
 pub mod curves;

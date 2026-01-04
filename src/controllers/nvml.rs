@@ -1,5 +1,3 @@
-#![cfg(feature = "nvml")]
-
 use nvml_wrapper::{Device, Nvml, enums::device::FanControlPolicy, error::NvmlError};
 
 use crate::controllers::FanControlError;

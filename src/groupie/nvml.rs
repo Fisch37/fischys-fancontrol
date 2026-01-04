@@ -37,7 +37,7 @@ pub fn add_optional_sensor<Name: ToString + ?Sized>(
                 name: sensor_name.to_string(),
                 input: x,
                 min: 0.0,
-                max: max,
+                max,
                 adapter: adapter.clone()
             }) {
                 post_dup_warn(sensor);
