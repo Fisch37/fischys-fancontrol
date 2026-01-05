@@ -16,6 +16,7 @@ static LIBSENSORS_DOES_NOT_EXIST: AtomicBool = AtomicBool::new(true);
 /// A handle to an initialized libsensors environment.
 /// Note that only one of these may exist at the same time during the lifetime of a program!
 /// libsensors also makes no claims as to thread safety, so creating two instances in different threads is also forbidden!
+#[derive(Debug)]
 pub struct LibSensors {
 
 }

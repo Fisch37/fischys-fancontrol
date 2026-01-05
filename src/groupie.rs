@@ -6,7 +6,10 @@ use strum::{EnumCount, EnumIter};
 use crate::GlobalContext;
 
 mod nvidia;
+#[cfg(feature = "sensors-cmd")]
 mod lm_sensors;
+#[cfg(feature = "libsensors")]
+mod libsensors;
 mod nvml;
 
 pub trait SensorKey {
@@ -115,6 +118,7 @@ pub enum SensorKind {
     Power,
     Voltmeter,
     Current,
+    Energy
 }
 impl Display for SensorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -244,12 +248,30 @@ impl SensorStorage {
     }
 }
 
+type SensorSource<'a> = &'a dyn Fn(&mut QueryResult, &GlobalContext) -> Result<(), Box<dyn Error>>;
+const QUERY_FNS: &[SensorSource] = &[
+    #[cfg(feature = "sensors-cmd")]
+    &lm_sensors::query_sensors,
+    #[cfg(feature = "libsensors")]
+    &libsensors::query_sensors,
+    #[cfg(feature = "nvidia-smi")]
+    &nvidia::query_sensors,
+    #[cfg(feature = "nvml")]
+    &nvml::query_sensors,
+];
+
 pub fn query_sensors(state: &mut QueryResult, context: &GlobalContext) -> Result<(), Box<dyn Error>> {
     state.clear();
 
-    let res = lm_sensors::query_sensors(state)
-        .and(nvidia::query_sensors(state))
-        .and(nvml::query_sensors(state, context));
+    // TODO: Add better error handling
+    let mut res = Ok(());
+    for query_fn in QUERY_FNS {
+        let mini_res = query_fn(state, context);
+        if mini_res.is_err() {
+            res = mini_res;
+            break;
+        }
+    }
 
     // Unfortunately the nature of the data structure makes it impossible to estimate the capacity per category.
     // However! If the QueryResult is reused (as it should be), there is unlikely to be any change in size after the first call.

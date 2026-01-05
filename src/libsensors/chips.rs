@@ -1,4 +1,4 @@
-use std::{ffi::{CStr, c_int}, iter::FusedIterator};
+use std::{ffi::{CStr, c_int, c_short}, fmt::Display, iter::FusedIterator};
 
 use sensors_sys::{sensors_bus_id, sensors_chip_name, sensors_get_features};
 
@@ -22,10 +22,10 @@ fn get_feature_raw<'lm>(
         .map(|f| Feature::from_raw(f, libsensors))
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Chip<'lm> {
-    pub prefix: &'lm CStr,
-    pub bus: sensors_bus_id,
+    pub prefix: &'lm str,
+    pub bus: Bus,
     pub addr: c_int,
     pub path: &'lm CStr,
 
@@ -40,8 +40,8 @@ impl<'lm> Chip<'lm> {
             //  therefore, it is a valid C-String, therefore this is safe.
             //  The data will also exist until the next sensors_cleanup call, which means the 'lm lifetime passed above.
             //  (I'm still not sure about immutability though)
-            prefix: unsafe { CStr::from_ptr(raw.prefix) },
-            bus: raw.bus,
+            prefix: unsafe { CStr::from_ptr(raw.prefix) }.to_str().expect("TODO: Error handling for failed to_str conversion on Chip.prefix"),
+            bus: Bus::try_from(raw.bus).expect("TODO: Better error handling for failed bus parsing on Chip.bus"),
             addr: raw.addr,
             // SAFETY: see above.
             path: unsafe { CStr::from_ptr(raw.path) },
@@ -63,6 +63,19 @@ impl<'lm> Chip<'lm> {
         // I'm a bit annoyed, at re-exposing raw here,
         // but not doing so would bind me to &self's lifetime unnecessarily.
         FeatureIterator::new(self.raw, self.libsensors)
+    }
+}
+impl<'lm> Display for Chip<'lm> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}-{}-", self.prefix, self.bus)?;
+        let mut past_prefix_zeroes = false;
+        for byte in self.addr.to_be_bytes() {
+            if byte != 0 || past_prefix_zeroes {
+                past_prefix_zeroes = true;
+                write!(f, "{byte:02x}")?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -95,3 +108,63 @@ impl<'lm> Iterator for FeatureIterator<'lm> {
     }
 }
 impl<'lm> FusedIterator for FeatureIterator<'lm> { }
+
+#[derive(Clone, Debug)]
+pub struct Bus {
+    pub type_: BusType,
+    pub nr: c_short
+}
+impl TryFrom<sensors_bus_id> for Bus {
+    type Error = strum::ParseError;
+
+    fn try_from(value: sensors_bus_id) -> Result<Self, Self::Error> {
+        BusType::from_repr(value.type_)
+            .ok_or(strum::ParseError::VariantNotFound)
+            .map(|bus_type| {
+                Bus {
+                    type_: bus_type,
+                    nr: value.nr
+                }
+            })
+    }
+}
+impl Display for Bus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}-{}", self.type_, self.nr)
+    }
+}
+
+#[repr(i16)]
+#[derive(Clone, Copy, Debug, strum::FromRepr)]
+pub enum BusType {
+    I2C = 0,
+    ISA = 1,
+    PCI = 2,
+    SPI = 3,
+    VIRTUAL = 4,
+    ACPI = 5,
+    HID = 6,
+    MDIO = 7,
+    SCSI = 8
+}
+impl BusType {
+    pub fn str_repr(&self) -> &'static str {
+        use self::BusType::*;
+        match self {
+            I2C => "i2c",
+            ISA => "isa",
+            PCI => "pci",
+            SPI => "spi",
+            VIRTUAL => "virt",
+            ACPI => "acpi",
+            HID => "hid",
+            MDIO => "mdio",
+            SCSI => "scsi"
+        }
+    }
+}
+impl Display for BusType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.str_repr())
+    }
+}

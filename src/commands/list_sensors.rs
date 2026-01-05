@@ -12,6 +12,7 @@ fn format_input(kind: SensorKind, input: f64) -> String {
         SensorKind::Power => format!("{input:.2}W"),
         SensorKind::Voltmeter => format!("{input:.3}V"),
         SensorKind::Current => format!("{input:.3}A"),
+        SensorKind::Energy => format!("{input:.3}J")
     }
 }
 

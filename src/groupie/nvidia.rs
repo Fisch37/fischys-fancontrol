@@ -3,10 +3,11 @@ use std::{process::Command, rc::Rc};
 
 use log::warn;
 
-use crate::utils::{ErrorGroup, ExitStatusError, SimpleError};
+use crate::{GlobalContext, utils::{ErrorGroup, ExitStatusError, SimpleError}};
 use super::{QueryResult, SensorData, SensorKind, Adapter};
 
-pub fn query_sensors(state: &mut QueryResult) -> Result<(), Box<dyn std::error::Error>> {
+// unused parameter allows homogenous array in groupie.rs
+pub fn query_sensors(state: &mut QueryResult, #[allow(unused)] context: &GlobalContext) -> Result<(), Box<dyn std::error::Error>> {
     let result = Command::new("nvidia-smi")
         .arg("--query-gpu=uuid,name,temperature.gpu,temperature.gpu.tlimit,temperature.memory")
         .arg("--format=csv")

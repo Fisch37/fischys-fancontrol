@@ -1,6 +1,6 @@
 use std::ffi::{CStr, c_int, c_uint};
 
-use sensors_sys::{SENSORS_MODE_R, SENSORS_MODE_W, sensors_chip_name, sensors_feature, sensors_feature_type::Type as FeatureType, sensors_get_all_subfeatures, sensors_get_subfeature, sensors_get_value, sensors_set_value, sensors_subfeature, sensors_subfeature_type::Type as SubfeatureType};
+use sensors_sys::{SENSORS_MODE_R, SENSORS_MODE_W, sensors_chip_name, sensors_feature, sensors_feature_type::Type as FeatureType, sensors_get_all_subfeatures, sensors_get_label, sensors_get_subfeature, sensors_get_value, sensors_set_value, sensors_subfeature, sensors_subfeature_type::Type as SubfeatureType};
 
 use super::{LibSensors, chips::Chip, utils::ptr_to_ref, error::{Result, Error}};
 
@@ -24,7 +24,7 @@ unsafe fn subfeature_by_index<'lm>(
         .map(|s| Subfeature::from_raw(s, chip, libsensors))
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Feature<'lm> {
     pub name: &'lm CStr,
     pub number: c_int,
@@ -65,6 +65,12 @@ impl<'lm> Feature<'lm> {
 
     pub fn get_subfeatures(&self, chip: &Chip<'lm>) -> SubfeatureIterator<'lm> {
         SubfeatureIterator::new(chip.raw, self.raw, self.subfeature_start_index, self.libsensors)
+    }
+
+    pub fn get_name(&self) -> std::result::Result<String, ()> {
+        // sensors_get_label returns a manually allocated char*.
+        // freeing values allocated in an FFI is an impossible problem in Rust.
+        unimplemented!("no implementation for Feature::get_name (would be: sensors_get_label)")
     }
 }
 
@@ -110,7 +116,7 @@ impl<'lm> Iterator for SubfeatureIterator<'lm> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Subfeature<'lm> {
     pub name: &'lm CStr,
     pub number: c_int,
@@ -170,5 +176,56 @@ impl<'lm> Subfeature<'lm> {
 
     pub fn can_set(&self) -> bool {
         self.flags & (SENSORS_MODE_W as u32) != 0
+    }
+}
+
+/// Feature-independent enum for commonly used subtypes
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenericSubfeature {
+    Input,
+    Min,
+    Max,
+}
+impl GenericSubfeature {
+    pub fn to_primitive(self, feature_type: FeatureType) -> Option<SubfeatureType> {
+        use sensors_sys::sensors_feature_type::*;
+        use sensors_sys::sensors_subfeature_type::*;
+        Some(match self {
+            // can you see me doing this for every possible subfeature?
+            // no. no you cannot. because i will not.
+            Self::Input => {
+                match feature_type {
+                    SENSORS_FEATURE_IN => SENSORS_SUBFEATURE_IN_INPUT,
+                    SENSORS_FEATURE_FAN => SENSORS_SUBFEATURE_FAN_INPUT,
+                    SENSORS_FEATURE_TEMP => SENSORS_SUBFEATURE_FAN_INPUT,
+                    SENSORS_FEATURE_POWER => SENSORS_SUBFEATURE_POWER_INPUT,
+                    SENSORS_FEATURE_ENERGY => SENSORS_SUBFEATURE_ENERGY_INPUT,
+                    SENSORS_FEATURE_CURR => SENSORS_SUBFEATURE_CURR_INPUT,
+                    SENSORS_FEATURE_HUMIDITY => SENSORS_SUBFEATURE_HUMIDITY_INPUT,
+                    _ => return None
+                }
+            },
+            Self::Min => {
+                match feature_type {
+                    SENSORS_FEATURE_IN => SENSORS_SUBFEATURE_IN_MIN,
+                    SENSORS_FEATURE_FAN => SENSORS_SUBFEATURE_FAN_MIN,
+                    SENSORS_FEATURE_TEMP => SENSORS_SUBFEATURE_TEMP_MIN,
+                    SENSORS_FEATURE_POWER => SENSORS_SUBFEATURE_POWER_MIN,
+                    SENSORS_FEATURE_CURR => SENSORS_SUBFEATURE_CURR_MIN,
+                    _ => return None
+                }
+            },
+            Self::Max => {
+                match feature_type {
+                    SENSORS_FEATURE_IN => SENSORS_SUBFEATURE_IN_MAX,
+                    SENSORS_FEATURE_FAN => SENSORS_SUBFEATURE_FAN_MAX,
+                    SENSORS_FEATURE_TEMP => SENSORS_SUBFEATURE_TEMP_MAX,
+                    SENSORS_FEATURE_POWER => SENSORS_SUBFEATURE_POWER_MAX,
+                    SENSORS_FEATURE_CURR => SENSORS_SUBFEATURE_CURR_MAX,
+                    _ => return None
+                }
+            },
+        })
     }
 }

@@ -42,7 +42,9 @@ static mut GLOBAL_CONTEXT_CREATED: bool = false;
 /// even though there is no reason to do so. If that happens, a warning will be issued.
 pub struct GlobalContext {
     #[cfg(feature = "nvml")]
-    nvml: nvml_wrapper::Nvml
+    nvml: nvml_wrapper::Nvml,
+    #[cfg(feature = "libsensors")]
+    libsensors: libsensors::LibSensors,
 }
 impl GlobalContext {
     pub fn init() -> Result<Self, Box<dyn std::error::Error>> {
@@ -56,13 +58,22 @@ impl GlobalContext {
             #[cfg(feature = "nvml")]
             nvml: {
                 nvml_wrapper::Nvml::init()?
-            }
+            },
+            #[cfg(feature = "libsensors")]
+            libsensors: {
+                libsensors::LibSensors::init()?
+            },
         }).inspect(|_| unsafe { GLOBAL_CONTEXT_CREATED = true })
     }
 
     #[cfg(feature = "nvml")]
     pub fn get_nvml(&self) -> &nvml_wrapper::Nvml {
         &self.nvml
+    }
+
+    #[cfg(feature = "libsensors")]
+    pub fn get_libsensors(&self) -> &libsensors::LibSensors {
+        &self.libsensors
     }
 }
 

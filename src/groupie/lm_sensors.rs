@@ -1,7 +1,7 @@
 use std::{error::Error, process::Command, rc::Rc};
 use log::{debug, log_enabled, warn};
 
-use crate::utils::{ExitStatusError, MalformedDataError};
+use crate::{GlobalContext, utils::{ExitStatusError, MalformedDataError}};
 
 use super::{QueryResult, SensorData, Adapter, SensorKind};
 
@@ -25,7 +25,8 @@ pub fn from_lm_sensors_name(name: &str) -> Option<SensorKind> {
     }
 }
 
-pub fn query_sensors(state: &mut QueryResult) -> Result<(), Box<dyn Error>> {
+// context param is necessary for function pointer array in groupie.rs
+pub fn query_sensors(state: &mut QueryResult, #[allow(unused)] context: &GlobalContext) -> Result<(), Box<dyn Error>> {
     let result = Command::new("sensors")
         .arg("-j")
         .output()?;
