@@ -1,15 +1,15 @@
 use std::path::{Path, PathBuf};
 
-use clap::Parser;
+use clap::Parser as _;
 use lazy_static::lazy_static;
+#[cfg(feature = "libsensors")]
+use libsensors_rs::LibSensors;
 use log::warn;
 
 use crate::commands::characteristics::CharacteristicsArgs;
 
 pub mod fan_configuration;
 pub mod fan_discovery;
-#[cfg(feature = "libsensors")]
-pub mod libsensors;
 pub mod groupie;
 pub mod controllers;
 pub mod curves;
@@ -44,7 +44,7 @@ pub struct GlobalContext {
     #[cfg(feature = "nvml")]
     nvml: nvml_wrapper::Nvml,
     #[cfg(feature = "libsensors")]
-    libsensors: libsensors::LibSensors,
+    libsensors: LibSensors,
 }
 impl GlobalContext {
     pub fn init() -> Result<Self, Box<dyn std::error::Error>> {
@@ -61,7 +61,7 @@ impl GlobalContext {
             },
             #[cfg(feature = "libsensors")]
             libsensors: {
-                libsensors::LibSensors::init()?
+                LibSensors::init()?
             },
         }).inspect(|_| unsafe { GLOBAL_CONTEXT_CREATED = true })
     }
@@ -72,7 +72,7 @@ impl GlobalContext {
     }
 
     #[cfg(feature = "libsensors")]
-    pub fn get_libsensors(&self) -> &libsensors::LibSensors {
+    pub fn get_libsensors(&self) -> &LibSensors {
         &self.libsensors
     }
 }
