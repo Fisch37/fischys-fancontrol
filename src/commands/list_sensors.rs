@@ -17,6 +17,11 @@ fn format_input(kind: SensorKind, input: f64) -> String {
 }
 
 pub fn start() {
+    simple_logger::SimpleLogger::new()
+        .with_level(log::LevelFilter::Warn)
+        .env()
+        .init()
+        .unwrap();
     let context = GlobalContext::init().unwrap();
     let mut state = QueryResult::new();
     query_sensors(&mut state, &context).unwrap();
