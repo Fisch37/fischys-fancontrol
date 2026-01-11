@@ -27,7 +27,7 @@ libsensors-rs = { git = "https://github.com/Fisch37/libsensors-rs.git", optional
 
 
 [features]
-# default = ["sensors-cmd", "nvidia-smi"]
+default = ["nvml", "libsensors"]
 nvml = ["dep:nvml-wrapper"]
 libsensors = ["dep:libsensors-rs"]
 sensors-cmd = []
