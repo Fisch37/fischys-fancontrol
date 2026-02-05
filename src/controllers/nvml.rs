@@ -30,10 +30,15 @@ impl<'a> Iterator for DeviceIterator<'a> {
     }
 }
 
-pub fn get_devices(nvml: &'_ Nvml) -> Result<DeviceIterator<'_>, NvmlError> {
-    nvml.device_count().map(|device_count| {
-        DeviceIterator { nvml, index: 0, device_count }
-    })
+pub trait NvmlExtensions {
+    fn get_devices(&self) -> Result<DeviceIterator<'_>, NvmlError>;
+}
+impl NvmlExtensions for Nvml {
+    fn get_devices(&self) -> Result<DeviceIterator<'_>, NvmlError> {
+        self.device_count().map(|device_count| {
+            DeviceIterator { nvml: self, index: 0, device_count }
+        })
+    }
 }
 
 // This is not a beautiful function, but it does allow us to "clone" a Device struct.
@@ -51,7 +56,7 @@ pub struct NVIDIAFanController<'nvml> {
 impl<'nvml> NVIDIAFanController<'nvml> {
     // Scans all NVML devices for their controllable fans
     pub fn scan(nvml: &'nvml Nvml) -> Result<Vec<Self>, NvmlError> {
-        let device_iterator = get_devices(nvml)?;
+        let device_iterator = nvml.get_devices()?;
         // most GPUs have at least two fans. (Breathtaking estimation, but better than nothing)
         let mut output = Vec::with_capacity(2 * device_iterator.size_hint().0);
         for dev in device_iterator {

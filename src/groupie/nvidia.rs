@@ -1,3 +1,5 @@
+#![cfg(feature = "nvidia-smi")]
+
 use core::f64;
 use std::{process::Command, rc::Rc};
 

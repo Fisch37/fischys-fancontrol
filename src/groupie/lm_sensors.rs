@@ -1,3 +1,5 @@
+#![cfg(feature = "sensors-cmd")]
+
 use std::{error::Error, process::Command, rc::Rc};
 use log::{debug, log_enabled, warn};
 

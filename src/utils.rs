@@ -13,7 +13,7 @@ impl SimpleError {
     pub fn new(message: String) -> SimpleError {
         SimpleError { message }
     }
-    pub fn from_slice(message: &str) -> SimpleError {
+    pub fn from_slice<S: ToString>(message: S) -> SimpleError {
         SimpleError { message: message.to_string() }
     }
 }
@@ -69,9 +69,9 @@ pub struct ErrorGroup {
 }
 impl Display for ErrorGroup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut res = write!(f, "ErrorGroup[");
+        let mut res = write!(f, "ErrorGroup[\n");
         for e in &self.errors {
-            res = res.and(write!(f, "{},", e));
+            res = res.and(write!(f, "  - {e},"));
         }
         res = res.and(write!(f, "]"));
         res
@@ -84,16 +84,84 @@ impl ErrorGroup {
     }
 
     pub fn push<E: Error + 'static>(&mut self, e: E) {
-        self.errors.push(Box::new(e));
+        self.push_box(Box::new(e));
+    }
+    pub fn push_box(&mut self, e: Box<dyn Error>) {
+        self.errors.push(e);
+    }
+
+    /// A helper function wrapping an iterator of [`Result`]s.
+    /// Skips all [`Err`] variants in the iterator, adding the contained [`Error`] to this [`ErrorGroup`]
+    /// and yields only the contents of [`Ok`] variants.
+    pub fn ok_or_store<I, T, E>(&mut self, it: I) -> ErrorGroupConsumeIterator<'_, I::IntoIter, T, E>
+        where I: IntoIterator<Item = Result<T, E>>, E: Error + 'static
+    {
+        ErrorGroupConsumeIterator { target: self, it: it.into_iter() }
+    }
+
+    /// Consumes an [`Iterator`] of [`Result`]s and pushes all [`Err`]s onto self,
+    /// until the iterator is exhausted or an [`Ok`] is encountered.
+    pub fn push_until_ok<I, T, E>(&mut self, it: &mut I) -> Option<T>
+        where I: Iterator<Item = Result<T, E>>, E: Error + 'static
+    {
+        while let Some(result) = it.next() {
+            match result {
+                Ok(t) => return Some(t),
+                Err(e) => self.push(e)
+            }
+        }
+        None
     }
 
     pub fn is_empty(&self) -> bool {
         self.errors.is_empty()
     }
+
+    pub fn ok(self) -> Result<(), Self> {
+        if self.is_empty() { Ok(()) } else { Err(self) }
+    }
 }
 impl Default for ErrorGroup {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Helper macro for using an [`ErrorGroup`] in loops.
+/// If the result of `expr` is an [`Err`],
+/// pushes the error onto the `error_group` and skips this loop iteration.
+/// If thr result is an [`Ok`], returns the contained value.
+#[macro_export]
+macro_rules! eg_push_and_continue {
+    ($error_group: ident, $expr: expr) => {
+        match $expr {
+            Ok(t) => t,
+            Err(e) => {
+                $error_group.push(e);
+                continue;
+            }
+        }
+    };
+}
+struct ErrorGroupConsumeIterator<'e, I: Iterator<Item = Result<T, E>>, T, E: Error + 'static> {
+    target: &'e mut ErrorGroup,
+    it: I
+}
+impl<'e, I: Iterator<Item = Result<T, E>>, T, E: Error + 'static> Iterator for ErrorGroupConsumeIterator<'e, I, T, E> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(result) = self.it.next() {
+            match result {
+                Ok(t) => return Some(t),
+                Err(e) => self.target.push(e)
+            }
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, self.it.size_hint().1)
     }
 }
 

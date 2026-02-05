@@ -25,6 +25,7 @@ clap = { version = "4.5.53", features = ["derive"] }
 nvml-wrapper = { version = "0.11.0", optional = true }
 libsensors-rs = { git = "https://github.com/Fisch37/libsensors-rs.git", optional = true }
 
+hashbrown = ">=0.16"
 
 [features]
 default = ["nvml", "libsensors"]

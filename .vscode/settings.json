@@ -4,9 +4,7 @@
     "lldb.dereferencePointers": true,
     "lldb.consoleMode": "evaluate",
     "rust-analyzer.cargo.features": [
-        "sensors-cmd",
         "libsensors",
-        "nvml",
-        "nvidia-smi"
+        "nvml"
     ]
 }
