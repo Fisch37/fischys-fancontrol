@@ -1,38 +1,30 @@
-use std::{fmt::Display, iter::{repeat_with, zip}, thread::sleep, time::Duration};
+use std::{
+    iter::{repeat_with, zip},
+    thread::sleep,
+    time::Duration,
+};
 
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{GlobalContext, controllers::{FanController, Pwm}, groupie::{QueryResult, SensorData, SensorKey, SensorKind, query_sensors}};
-
+use crate::{
+    GlobalContext,
+    controllers::{FanController, Pwm},
+    groupie::{OwnedKey, SensorKey, SensorKind, SensorStorage},
+    utils::SimpleError,
+};
 
 #[derive(Serialize, Deserialize)]
 pub struct FanProperties {
     pub sensor: (String, String),
     pub rpm_curve: Vec<Point>,
-    pub safe_start: f64
+    pub safe_start: f64,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Point {
     pwm: f64,
-    rpm: f64
+    rpm: f64,
 }
-
-#[derive(Debug)]
-struct Error {
-    message: String
-}
-impl Error {
-    pub fn new(message: String) -> Error {
-        Error { message }
-    }
-}
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Error(FanConfiguration: {})", self.message)
-    }
-}
-impl std::error::Error for Error { }
 
 const PRECISION: f64 = 15.0;
 const ACTIVATION_BOUNDRY: f64 = 5.0;
@@ -46,21 +38,22 @@ const FAN_SLOWDOWN_DELAY: Duration = Duration::from_secs(10);
 /// Determines the RPM curve of a fan depending on another PWM state.
 /// This function assumes that the sensor pwm combo passed actually matches each other.
 /// If this is not the case, the output will be nonsensical.
-pub fn detect_fan_properties<Key: SensorKey>(
+pub fn detect_fan_properties<K: SensorKey>(
     pwm: &mut dyn FanController,
-    rpm_sensors: &[Key],
-    context: &GlobalContext
+    rpm_sensors: &[K],
+    context: &GlobalContext,
 ) -> Result<Vec<FanProperties>, Box<dyn std::error::Error>> {
     eprintln!("Graphing {}", pwm.get_key());
     let previous_responsibility_state = pwm.is_auto()?;
 
-    let mut state = QueryResult::new();
+    let mut state = SensorStorage::new(context);
     pwm.set_auto(false)?;
-    
-    let mut rpm_curves: Vec<Vec<Point>> = repeat_with(|| Vec::with_capacity((pwm.get_max_value()/PRECISION) as usize + 1))
-        .take(rpm_sensors.len())
-        .collect();
-    
+
+    let mut rpm_curves: Vec<Vec<Point>> =
+        repeat_with(|| Vec::with_capacity((pwm.get_max_value() / PRECISION) as usize + 1))
+            .take(rpm_sensors.len())
+            .collect();
+
     let mut value: f64 = pwm.get_max_value();
     pwm.write_value(value)?;
     // Fan needs to get up to speed
@@ -68,15 +61,21 @@ pub fn detect_fan_properties<Key: SensorKey>(
     loop {
         pwm.write_value(value)?;
         sleep(FAN_STEP_DELAY);
-        query_sensors(&mut state, context)?;
-        
-        let fans = state.get_of_kind(SensorKind::Fan);
+        state.update()?;
+
         eprint!("{value} -> ");
         for (key, points) in zip(rpm_sensors, rpm_curves.iter_mut()) {
             let key_parts = key.get_sensor_key();
-            let sensor = fans.get(key)
-                .ok_or_else(|| Error { message: format!("Couldn't find sensor {}/{}", key_parts.0, key_parts.1) })?;
-            points.push(Point { pwm: value, rpm: sensor.input });
+            let sensor = state.get_sensor_data(key).ok_or_else(|| {
+                SimpleError::new(format!(
+                    "Couldn't find sensor {}/{}",
+                    key_parts.0, key_parts.1
+                ))
+            })?;
+            points.push(Point {
+                pwm: value,
+                rpm: sensor.input,
+            });
             eprint!("{} ", sensor.input);
         }
         eprintln!();
@@ -88,8 +87,7 @@ pub fn detect_fan_properties<Key: SensorKey>(
         }
     }
 
-
-    let start_values = find_start_values(pwm, rpm_sensors, &mut state, context)?;
+    let start_values = find_start_values(pwm, rpm_sensors, &mut state)?;
     eprint!("Start values: ");
     for start in &start_values {
         eprint!("{start} ");
@@ -97,25 +95,22 @@ pub fn detect_fan_properties<Key: SensorKey>(
     eprintln!();
 
     pwm.set_auto(previous_responsibility_state)?;
-    Ok(
-        zip(rpm_sensors, zip(rpm_curves, start_values))
+    Ok(zip(rpm_sensors, zip(rpm_curves, start_values))
         .map(|(key, (points, start_value))| {
             let (adapter_key, sensor_name) = key.get_sensor_key();
             FanProperties {
                 sensor: (adapter_key.to_string(), sensor_name.to_string()),
                 rpm_curve: points,
-                safe_start: start_value
+                safe_start: start_value,
             }
         })
-        .collect()
-    )
+        .collect())
 }
 
 fn find_start_values<Key: SensorKey>(
     pwm: &mut dyn FanController,
     rpm_sensors: &[Key],
-    state: &mut QueryResult,
-    context: &GlobalContext
+    state: &mut SensorStorage,
 ) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
     let pwm_max = pwm.get_max_value();
     pwm.write_value(pwm.get_min_value())?;
@@ -130,16 +125,26 @@ fn find_start_values<Key: SensorKey>(
     while start_values.contains(&pwm_max) && value < pwm_max {
         pwm.write_value(value)?;
         sleep(FAN_STEP_DELAY);
-        query_sensors(state, context)?;
+        state.update()?;
 
-        for (key, start_value) in zip(rpm_sensors, start_values.iter_mut())
-            .filter(|(_, b)| **b == pwm_max)
+        for (key, start_value) in
+            zip(rpm_sensors, start_values.iter_mut()).filter(|(_, b)| **b == pwm_max)
         {
-            let sensor = state.get_of_kind(SensorKind::Fan).get(key)
-                .ok_or_else(|| Error { message: format!("Sensor disappeared during fan-start analysis: {}/{}", key.get_adapter_key(), key.get_sensor_name()) })?;
+            let sensor = state.get_sensor_data(key).ok_or_else(|| {
+                SimpleError::new(format!(
+                    "Sensor disappeared during fan-start analysis: {}/{}",
+                    key.get_adapter_key(),
+                    key.get_sensor_name()
+                ))
+            })?;
             if sensor.input >= ACTIVATION_BOUNDRY {
                 *start_value = value;
-                eprintln!("Fan {}/{} started at value {value} ({} RPM)", key.get_adapter_key(), key.get_sensor_name(), sensor.input);
+                eprintln!(
+                    "Fan {}/{} started at value {value} ({} RPM)",
+                    key.get_adapter_key(),
+                    key.get_sensor_name(),
+                    sensor.input
+                );
             }
         }
         // Naive adding is fine, because inf !< inf in Rust, so the loop will still exit
@@ -150,40 +155,45 @@ fn find_start_values<Key: SensorKey>(
 
 /// Finds all rpm sensors tied to this PWM control.
 /// At the end of this function the PWM will be set to manual mode!
-pub fn find_controlled_fans(pwm: &mut Pwm, context: &GlobalContext) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
-    let mut query_result = QueryResult::new();
+pub fn find_controlled_fans(
+    pwm: &mut Pwm,
+    context: &GlobalContext,
+) -> Result<Vec<OwnedKey>, Box<dyn std::error::Error>> {
+    let mut state = SensorStorage::new(context);
 
     // Phase 1: Set PWM HIGH
     pwm.set_auto(false)?;
     pwm.write_value(pwm.get_max_value())?;
     sleep(FAN_SPEEDUP_DELAY);
-    query_sensors(&mut query_result, context)?;
-    let phase1_states = query_result.get_of_kind(SensorKind::Fan).clone();
+    state.update()?;
+    let phase1_states: Vec<_> = state
+        .iter_data()
+        .filter(|d| d.kind == SensorKind::Fan)
+        // Hack to circumvent simultaneous borrow issue
+        // SensorData borrows Sensor.name (to avoid continuous allocations),
+        // but that means SensorData also can't be stored across state.update boundaries
+        // (because update borrows state mutably, and SensorData borrows it immutably).
+        // Fixing this is complicated.
+        .map(|d| (d.get_owned_key(), d.input))
+        .collect();
 
     // Phase 2: Set PWM low
     pwm.write_value(pwm.get_min_value())?;
     sleep(FAN_SLOWDOWN_DELAY);
-    query_sensors(&mut query_result, context)?;
+    state.update()?;
 
     // Find sensors with notable rpm drop
-    // it's rare for a PWM to target multiple fans
+    // capacity=1: it's rare for a PWM to target multiple fans
     let mut affected_sensors = Vec::with_capacity(1);
-    for phase1 in phase1_states.unpack().into_iter() {
-        match get_matching_sensor(&query_result, &phase1) {
-            Err(e) => eprintln!("{:?} disappeared after first check! {e}", phase1.get_sensor_key()),
-            Ok(phase2) => {
-                if (phase1.input - phase2.input)/phase1.input > FAN_DETECTION_THRESHOLD {
-                    affected_sensors.push((phase1.adapter.key.clone(), phase1.name));
+    for phase1 in phase1_states.into_iter() {
+        match state.get_sensor_data(&phase1.0) {
+            None => eprintln!("{} disappeared after first check!", phase1.0.display()),
+            Some(phase2) => {
+                if (phase1.1 - phase2.input) / phase1.1 > FAN_DETECTION_THRESHOLD {
+                    affected_sensors.push(phase1.0);
                 }
             }
         }
     }
     Ok(affected_sensors)
-}
-
-fn get_matching_sensor<'a>(state: &'a QueryResult, sensor: &SensorData) -> Result<&'a SensorData, Error> {
-    match state.get_of_kind(sensor.kind).get_from_parts(&sensor.adapter.key, &sensor.name) {
-        None => Err(Error::new(format!("Could not find a sensor {}/{}", sensor.adapter.key, sensor.name))),
-        Some(x) => Ok(x)
-    }
 }

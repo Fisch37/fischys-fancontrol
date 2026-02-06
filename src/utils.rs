@@ -1,4 +1,8 @@
-use std::{error::Error, fmt::Display, ops::{Deref, DerefMut}};
+use std::{
+    error::Error,
+    fmt::{Debug, Display},
+    ops::{Deref, DerefMut},
+};
 
 use log::{debug, error, warn};
 
@@ -7,14 +11,16 @@ use crate::controllers::FanController;
 #[derive(Debug)]
 pub struct SimpleError {
     #[allow(unused)]
-    message: String
+    pub(crate) message: String,
 }
 impl SimpleError {
     pub fn new(message: String) -> SimpleError {
         SimpleError { message }
     }
     pub fn from_slice<S: ToString>(message: S) -> SimpleError {
-        SimpleError { message: message.to_string() }
+        SimpleError {
+            message: message.to_string(),
+        }
     }
 }
 impl Display for SimpleError {
@@ -22,7 +28,7 @@ impl Display for SimpleError {
         write!(f, "{:?}", self)
     }
 }
-impl Error for SimpleError { }
+impl Error for SimpleError {}
 impl From<String> for SimpleError {
     fn from(value: String) -> Self {
         SimpleError::new(value)
@@ -32,40 +38,42 @@ impl From<String> for SimpleError {
 #[derive(Debug)]
 pub struct ExitStatusError {
     pub code: Option<i32>,
-    pub stderr: Vec<u8>
+    pub stderr: Vec<u8>,
 }
 impl Display for ExitStatusError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Exit with code {:?}: {}", self.code, String::from_utf8_lossy(self.stderr.as_slice()))
+        write!(
+            f,
+            "Exit with code {:?}: {}",
+            self.code,
+            String::from_utf8_lossy(self.stderr.as_slice())
+        )
     }
 }
-impl Error for ExitStatusError { }
+impl Error for ExitStatusError {}
 
 #[derive(Debug)]
 pub struct MalformedDataError {
-    value: String
+    value: String,
 }
 impl Display for MalformedDataError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.value)
     }
 }
-impl Error for MalformedDataError { }
+impl Error for MalformedDataError {}
 impl MalformedDataError {
     pub fn new(message: &str) -> MalformedDataError {
         MalformedDataError::new_with_string(message.to_string())
     }
     pub fn new_with_string(message: String) -> MalformedDataError {
-        MalformedDataError {
-            value: message
-        }
+        MalformedDataError { value: message }
     }
 }
 
-
 #[derive(Debug)]
 pub struct ErrorGroup {
-    errors: Vec<Box<dyn Error>>
+    errors: Vec<Box<dyn Error>>,
 }
 impl Display for ErrorGroup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -77,7 +85,7 @@ impl Display for ErrorGroup {
         res
     }
 }
-impl Error for ErrorGroup { }
+impl Error for ErrorGroup {}
 impl ErrorGroup {
     pub const fn new() -> Self {
         ErrorGroup { errors: vec![] }
@@ -93,21 +101,31 @@ impl ErrorGroup {
     /// A helper function wrapping an iterator of [`Result`]s.
     /// Skips all [`Err`] variants in the iterator, adding the contained [`Error`] to this [`ErrorGroup`]
     /// and yields only the contents of [`Ok`] variants.
-    pub fn ok_or_store<I, T, E>(&mut self, it: I) -> ErrorGroupConsumeIterator<'_, I::IntoIter, T, E>
-        where I: IntoIterator<Item = Result<T, E>>, E: Error + 'static
+    pub fn ok_or_store<I, T, E>(
+        &mut self,
+        it: I,
+    ) -> ErrorGroupConsumeIterator<'_, I::IntoIter, T, E>
+    where
+        I: IntoIterator<Item = Result<T, E>>,
+        E: Error + 'static,
     {
-        ErrorGroupConsumeIterator { target: self, it: it.into_iter() }
+        ErrorGroupConsumeIterator {
+            target: self,
+            it: it.into_iter(),
+        }
     }
 
     /// Consumes an [`Iterator`] of [`Result`]s and pushes all [`Err`]s onto self,
     /// until the iterator is exhausted or an [`Ok`] is encountered.
     pub fn push_until_ok<I, T, E>(&mut self, it: &mut I) -> Option<T>
-        where I: Iterator<Item = Result<T, E>>, E: Error + 'static
+    where
+        I: Iterator<Item = Result<T, E>>,
+        E: Error + 'static,
     {
         while let Some(result) = it.next() {
             match result {
                 Ok(t) => return Some(t),
-                Err(e) => self.push(e)
+                Err(e) => self.push(e),
             }
         }
         None
@@ -143,18 +161,20 @@ macro_rules! eg_push_and_continue {
         }
     };
 }
-struct ErrorGroupConsumeIterator<'e, I: Iterator<Item = Result<T, E>>, T, E: Error + 'static> {
+pub struct ErrorGroupConsumeIterator<'e, I: Iterator<Item = Result<T, E>>, T, E: Error + 'static> {
     target: &'e mut ErrorGroup,
-    it: I
+    it: I,
 }
-impl<'e, I: Iterator<Item = Result<T, E>>, T, E: Error + 'static> Iterator for ErrorGroupConsumeIterator<'e, I, T, E> {
+impl<'e, I: Iterator<Item = Result<T, E>>, T, E: Error + 'static> Iterator
+    for ErrorGroupConsumeIterator<'e, I, T, E>
+{
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(result) = self.it.next() {
             match result {
                 Ok(t) => return Some(t),
-                Err(e) => self.target.push(e)
+                Err(e) => self.target.push(e),
             }
         }
         None
@@ -175,7 +195,12 @@ pub fn return_to_auto<'a>(controllers: &mut [Box<dyn FanController + 'a>]) -> us
             match p.set_auto(true) {
                 Ok(_) => debug!("{} returned to auto", p.get_key()),
                 Err(e) => {
-                    error!("Failed to automate {}. {} retries left. Error: {}", p.get_key(), retries, e);
+                    error!(
+                        "Failed to automate {}. {} retries left. Error: {}",
+                        p.get_key(),
+                        retries,
+                        e
+                    );
                     pwms_buffer.push(p);
                 }
             }
@@ -187,16 +212,14 @@ pub fn return_to_auto<'a>(controllers: &mut [Box<dyn FanController + 'a>]) -> us
 }
 
 /// This struct is a guard around multiple controllers, that tries to return those controllers to automatic,
-/// when it leaves scope. Note that since this uses the [`Drop`] trait, 
+/// when it leaves scope. Note that since this uses the [`Drop`] trait,
 /// there is no guarantee that all controllers successfully enter automatic mode.
-/// 
+///
 /// This struct also implements [`Deref`] and [`DerefMut`] so that access to the contained values is still possible.
-pub struct ReturnToAutoWrapper<'a, 'b>
-{
-    controllers: &'b mut [Box<dyn FanController + 'a>]
+pub struct ReturnToAutoWrapper<'a, 'b> {
+    controllers: &'b mut [Box<dyn FanController + 'a>],
 }
-impl<'a, 'b> ReturnToAutoWrapper<'a, 'b>
-{
+impl<'a, 'b> ReturnToAutoWrapper<'a, 'b> {
     pub fn new(controllers: &'b mut [Box<dyn FanController + 'a>]) -> Self {
         Self { controllers }
     }
@@ -224,5 +247,46 @@ impl<'a, 'b> Drop for ReturnToAutoWrapper<'a, 'b> {
         if failed_count > 0 {
             warn!("Failed to return {failed_count} fan controllers to auto mode!")
         }
+    }
+}
+
+trait SliceDisplayExtender<'a> {
+    type DisplayHelper: Display;
+
+    fn display_join<J: Display>(&self, join_val: &'a J) -> Self::DisplayHelper;
+}
+impl<'a, 'b, T: Display> SliceDisplayExtender<'b> for &'a [T] {
+    type DisplayHelper = SliceJoinDisplay<'a, 'b, T>;
+
+    fn display_join<J: Display>(&self, join_str: &'b J) -> Self::DisplayHelper {
+        SliceJoinDisplay {
+            slice: self,
+            join: join_str,
+        }
+    }
+}
+pub struct SliceJoinDisplay<'a, 'b, T: Display> {
+    slice: &'a [T],
+    join: &'b dyn Display,
+}
+impl<'a, 'b, T: Display> Display for SliceJoinDisplay<'a, 'b, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut iter = self.slice.iter();
+        let mut last_element: Option<&T> = iter.next();
+        for element in iter {
+            write!(
+                f,
+                "{}",
+                last_element
+                    .expect("Slice iter is FusedIterator, last_element should always be Some here")
+            )?;
+            last_element = Some(element);
+            write!(f, "{}", self.join)?;
+        }
+        match last_element {
+            None => {}
+            Some(val) => write!(f, "{val}")?,
+        }
+        Ok(())
     }
 }

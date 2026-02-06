@@ -2,12 +2,16 @@ use std::{iter::zip, thread::sleep, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{GlobalContext, controllers::scan_all, groupie::{QueryResult, SensorKey as _, SensorKind, query_sensors}};
+use crate::{
+    GlobalContext,
+    controllers::scan_all,
+    groupie::{OwnedKey, SensorData, SensorKey, SensorKind, SensorStorage},
+};
 
 #[derive(Serialize, Deserialize)]
 pub struct Pwm2Fan {
     pub pwm: String,
-    pub fans: Vec<(String, String)>
+    pub fans: Vec<OwnedKey>,
 }
 
 fn join_borrowed<'a, I: IntoIterator<Item = &'a str>>(vec: I, separator: char) -> String {
@@ -19,19 +23,37 @@ fn join_borrowed<'a, I: IntoIterator<Item = &'a str>>(vec: I, separator: char) -
     str
 }
 
+fn get_all_in<'a, K: SensorKey, I: Iterator<Item = K>>(
+    it: I,
+    state: &'a SensorStorage,
+) -> impl Iterator<Item = SensorData<'a>> {
+    it.filter_map(|s| state.get_sensor_data(s))
+}
+
 const SENSITIVITY: f64 = 300.0;
-pub fn discover_pwm_fans(context: &GlobalContext) -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
-    let mut state = QueryResult::new();
+pub fn discover_pwm_fans(
+    context: &GlobalContext,
+) -> Result<Vec<Pwm2Fan>, Box<dyn std::error::Error>> {
+    let mut state = SensorStorage::new(context);
     let mut controllers = scan_all(context)?;
-    
-    query_sensors(&mut state, context)?;
-    {
-        let fans = state.get_of_kind(SensorKind::Fan)
-            .into_iter().map(|s| s.name.as_str());
-        
-        println!("Found {} fans: {}", fans.len(), join_borrowed(fans, ' '));
-        println!("Found {} pwms: {}", controllers.len(), join_borrowed(controllers.iter().map(|p| p.get_key()), ' '));
-    }
+
+    state.update()?;
+    let fans: Vec<_> = state
+        .iter_sensors()
+        .filter(|s| s.kind == SensorKind::Fan)
+        .cloned()
+        .collect();
+
+    println!(
+        "Found {} fans: {}",
+        fans.len(),
+        join_borrowed(fans.iter().map(SensorKey::get_sensor_name), ' ')
+    );
+    println!(
+        "Found {} pwms: {}",
+        controllers.len(),
+        join_borrowed(controllers.iter().map(|p| p.get_key()), ' ')
+    );
 
     for p in &mut controllers {
         p.set_auto(false)?;
@@ -39,28 +61,32 @@ pub fn discover_pwm_fans(context: &GlobalContext) -> Result<Vec<Pwm2Fan>, Box<dy
     }
     sleep(Duration::from_secs(5));
     println!("Spun up fans");
-    query_sensors(&mut state, context)?;
-    for fan in state.get_of_kind(SensorKind::Fan) {
+    state.update()?;
+    for fan in get_all_in(fans.iter(), &state) {
         print!("{} {:.0} RPM ", fan.name, fan.input)
     }
     println!();
 
-    let fan_speeds: Vec<f64> = state.get_of_kind(SensorKind::Fan).into_iter()
-        .map(|f: &crate::groupie::SensorData| f.input).collect();
+    let fan_speeds: Vec<f64> = get_all_in(fans.iter(), &state).map(|d| d.input).collect();
     let mut influence_list: Vec<Vec<usize>> = Vec::new();
     for p in &mut controllers {
         println!("Testing {}", p.get_key());
         p.write_value(p.get_min_value())?;
         sleep(Duration::from_secs(5));
-        query_sensors(&mut state, context)?;
-        let fans = state.get_of_kind(SensorKind::Fan);
+        state.update()?;
         let mut affected_fans = vec![];
-        for (i, (fan, original_speed)) in zip(fans, &fan_speeds).enumerate() {
+        //                                                             FIXME: This is vulnerable to state changes.
+        //                                                              get_fan_states may return an it of different len, because of filter_map.
+        //                                                              (Real world scenario: A fan doesn't receive any updates for a long time, so the old data gets discarded)
+        for (i, (fan, original_speed)) in
+            zip(get_all_in(fans.iter(), &state), &fan_speeds).enumerate()
+        {
+            // If fan RPM dropped more than SENSITIVITY
             if (original_speed - fan.input) > SENSITIVITY {
                 affected_fans.push(i);
             }
         }
-        
+
         let mut str = String::new();
         for i in &affected_fans {
             let (adapter_key, sensor_name) = &fans[*i].get_sensor_key();
@@ -70,7 +96,7 @@ pub fn discover_pwm_fans(context: &GlobalContext) -> Result<Vec<Pwm2Fan>, Box<dy
             str += " ";
         }
         println!("{} affects {}", p.get_key(), str);
-        
+
         influence_list.push(affected_fans);
         p.write_value(p.get_max_value())?;
         sleep(Duration::from_secs(5));
@@ -80,14 +106,11 @@ pub fn discover_pwm_fans(context: &GlobalContext) -> Result<Vec<Pwm2Fan>, Box<dy
         p.set_auto(true)?;
     }
 
-    let fans = state.get_of_kind(SensorKind::Fan);
     let mut output = Vec::with_capacity(controllers.len());
     for (i, affected) in influence_list.iter().enumerate() {
         output.push(Pwm2Fan {
             pwm: controllers[i].get_key().to_string(),
-            fans: affected.iter()
-                .map(|i| (fans[*i].adapter.key.clone(), fans[*i].name.clone()))
-                .collect()
+            fans: affected.iter().map(|i| fans[*i].get_owned_key()).collect(),
         });
     }
     Ok(output)

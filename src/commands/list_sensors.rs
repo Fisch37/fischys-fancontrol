@@ -1,4 +1,7 @@
-use crate::{GlobalContext, groupie::{Adapter, SensorKey, SensorKind, SensorStorage}};
+use crate::{
+    GlobalContext,
+    groupie::{Adapter, SensorKey, SensorKind, SensorStorage},
+};
 
 fn format_input(kind: SensorKind, input: f64) -> String {
     match kind {
@@ -8,7 +11,7 @@ fn format_input(kind: SensorKind, input: f64) -> String {
         SensorKind::Power => format!("{input:.2}W"),
         SensorKind::Voltmeter => format!("{input:.3}V"),
         SensorKind::Current => format!("{input:.3}A"),
-        SensorKind::Energy => format!("{input:.3}J")
+        SensorKind::Energy => format!("{input:.3}J"),
     }
 }
 
@@ -21,8 +24,8 @@ pub fn start() {
     let context = GlobalContext::init().unwrap();
     let mut state = SensorStorage::new(&context);
     state.update().unwrap();
-    
-    let mut state: Vec<_> = state.iter().flat_map(|s| s.iter()).collect();
+
+    let mut state: Vec<_> = state.iter().collect();
     state.sort_by(|(a, _), (b, _)| a.cmp_by_sensor_key(b));
 
     let mut last_adapter: Option<&Adapter> = None;

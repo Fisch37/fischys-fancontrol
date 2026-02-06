@@ -7,7 +7,7 @@ use super::FanController;
 pub struct DeviceIterator<'a> {
     nvml: &'a Nvml,
     index: u32,
-    device_count: u32
+    device_count: u32,
 }
 impl<'a> Iterator for DeviceIterator<'a> {
     type Item = Result<Device<'a>, NvmlError>;
@@ -35,8 +35,10 @@ pub trait NvmlExtensions {
 }
 impl NvmlExtensions for Nvml {
     fn get_devices(&self) -> Result<DeviceIterator<'_>, NvmlError> {
-        self.device_count().map(|device_count| {
-            DeviceIterator { nvml: self, index: 0, device_count }
+        self.device_count().map(|device_count| DeviceIterator {
+            nvml: self,
+            index: 0,
+            device_count,
         })
     }
 }
@@ -51,7 +53,7 @@ fn clone_device<'nvml>(device: &Device<'nvml>) -> Result<Device<'nvml>, NvmlErro
 pub struct NVIDIAFanController<'nvml> {
     device: Device<'nvml>,
     fan_idx: u32,
-    key: String
+    key: String,
 }
 impl<'nvml> NVIDIAFanController<'nvml> {
     // Scans all NVML devices for their controllable fans
@@ -64,7 +66,7 @@ impl<'nvml> NVIDIAFanController<'nvml> {
             let fan_count = match device.num_fans() {
                 // Device has no fans, so yeet it
                 Err(NvmlError::NotSupported) => continue,
-                res => res?
+                res => res?,
             };
             for fan_idx in 0..fan_count {
                 output.push(NVIDIAFanController {
@@ -83,11 +85,14 @@ impl<'nvml> FanController for NVIDIAFanController<'nvml> {
     }
 
     fn read_value(&self) -> Result<f64, FanControlError> {
-        self.device.fan_speed(self.fan_idx).map(Into::into)
+        self.device
+            .fan_speed(self.fan_idx)
+            .map(Into::into)
             .map_err(Into::into)
     }
     fn write_value(&mut self, value: f64) -> Result<(), FanControlError> {
-        self.device.set_fan_speed(self.fan_idx, value.round() as u32)
+        self.device
+            .set_fan_speed(self.fan_idx, value.round() as u32)
             .map_err(Into::into)
     }
 
@@ -100,7 +105,9 @@ impl<'nvml> FanController for NVIDIAFanController<'nvml> {
     fn get_min_max_value(&self) -> (f64, f64) {
         // FIXME: This will crash if NVMLError::GpuLost occurs
         //  We should instead propagate the error further up
-        let (min, max) = self.device.min_max_fan_speed()
+        let (min, max) = self
+            .device
+            .min_max_fan_speed()
             // GPU should have fans, because we check for that ahead of time.
             // (I don't think a GPU will just lose its fans at runtime)
             // Device may drop off the bus suddenly, but I don't think we can do anything about it?
@@ -109,15 +116,21 @@ impl<'nvml> FanController for NVIDIAFanController<'nvml> {
     }
 
     fn is_auto(&self) -> Result<bool, FanControlError> {
-        self.device.fan_control_policy(self.fan_idx)
+        self.device
+            .fan_control_policy(self.fan_idx)
             .map(|policy| policy != FanControlPolicy::Manual)
             .map_err(Into::into)
     }
     fn set_auto(&mut self, auto: bool) -> Result<(), FanControlError> {
-        self.device.set_fan_control_policy(
-            self.fan_idx,
-            if auto { FanControlPolicy::TemperatureContinousSw }
-            else { FanControlPolicy::Manual }
-        ).map_err(Into::into)
+        self.device
+            .set_fan_control_policy(
+                self.fan_idx,
+                if auto {
+                    FanControlPolicy::TemperatureContinousSw
+                } else {
+                    FanControlPolicy::Manual
+                },
+            )
+            .map_err(Into::into)
     }
 }

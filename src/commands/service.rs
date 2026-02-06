@@ -1,35 +1,64 @@
-use std::{collections::HashMap, env, error::Error as StdError, fmt::{Display, Write as _}, fs, io::ErrorKind as IOErrorKind, ops::Deref as _, panic::catch_unwind, sync::{Arc, atomic::{AtomicBool, Ordering}}, thread::sleep, time::Duration};
+use std::{
+    collections::HashMap,
+    env,
+    error::Error as StdError,
+    fmt::{Display, Write as _},
+    fs,
+    io::ErrorKind as IOErrorKind,
+    ops::Deref as _,
+    panic::catch_unwind,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread::sleep,
+    time::Duration,
+};
 
 use log::{error, info, warn};
 use signal_hook::{consts::signal, iterator::Signals};
 use simple_logger::init_with_env;
-use systemd_journal_logger::{connected_to_journal, JournalLog};
+use systemd_journal_logger::{JournalLog, connected_to_journal};
 
-use crate::{CONFIG_PATH, CURVES_PATH, DEFAULT_POLL_RATE, GlobalContext, POLL_ENV, controllers::{FanController, scan_all}, curves::{PwmCurve, update_pwms}, groupie::{QueryResult, query_sensors}, utils::{ReturnToAutoWrapper, return_to_auto}};
+use crate::{
+    CONFIG_PATH, CURVES_PATH, DEFAULT_POLL_RATE, GlobalContext, POLL_ENV,
+    controllers::{FanController, scan_all},
+    curves::{PwmCurve, update_pwms},
+    groupie::SensorStorage,
+    utils::{ReturnToAutoWrapper, return_to_auto},
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum ServiceErrorKind {
     Recoverable,
-    NeedsIntervention
+    NeedsIntervention,
 }
 #[derive(Debug)]
 struct ServiceError {
     error: Box<dyn StdError>,
     context: Option<&'static str>,
-    kind: ServiceErrorKind
+    kind: ServiceErrorKind,
 }
 impl ServiceError {
     #[inline]
-    fn new<E: StdError + 'static>(kind: ServiceErrorKind, context: Option<&'static str>, e: E) -> Self {
+    fn new<E: StdError + 'static>(
+        kind: ServiceErrorKind,
+        context: Option<&'static str>,
+        e: E,
+    ) -> Self {
         ServiceError {
             error: Box::new(e),
             context,
-            kind
+            kind,
         }
     }
 
     #[inline]
-    pub fn with_context<E: StdError + 'static>(kind: ServiceErrorKind, context: &'static str, e: E) -> Self {
+    pub fn with_context<E: StdError + 'static>(
+        kind: ServiceErrorKind,
+        context: &'static str,
+        e: E,
+    ) -> Self {
         Self::new(kind, Some(context), e)
     }
 
@@ -61,21 +90,22 @@ impl Display for ServiceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.context {
             None => write!(f, "{}", self.error),
-            Some(context) => write!(f, "{context}: {}", self.error)
+            Some(context) => write!(f, "{context}: {}", self.error),
         }
     }
 }
-impl StdError for ServiceError { }
+impl StdError for ServiceError {}
 
 fn start_logger() -> Result<(), String> {
     {
         if connected_to_journal() {
-            JournalLog::new().map_err(|e| e.to_string())
-                .and_then(|log|
+            JournalLog::new()
+                .map_err(|e| e.to_string())
+                .and_then(|log| {
                     log.install()
-                    .map_err(|e| e.to_string())
-                    .inspect(|_| info!("Started JournalLog"))
-                )
+                        .map_err(|e| e.to_string())
+                        .inspect(|_| info!("Started JournalLog"))
+                })
         } else {
             Err("Journal not connected".to_string())
         }
@@ -89,20 +119,20 @@ fn start_logger() -> Result<(), String> {
 }
 
 fn reload_config() -> Result<HashMap<String, PwmCurve>, ServiceError> {
-    let file = fs::File::open(CURVES_PATH.deref())
-        .map_err(|e| {
-            ServiceError::with_context(
-                match e.kind() {
-                    IOErrorKind::NotFound => {
-                        error!("Fan curves file does not exist. Please run setup");
-                        ServiceErrorKind::NeedsIntervention
-                    },
-                    IOErrorKind::PermissionDenied => ServiceErrorKind::NeedsIntervention,
-                    _ => ServiceErrorKind::Recoverable  // assume recoverable, because of spurious I/O errors
-                },
-                "Could not open config file", e
-            )
-        })?;
+    let file = fs::File::open(CURVES_PATH.deref()).map_err(|e| {
+        ServiceError::with_context(
+            match e.kind() {
+                IOErrorKind::NotFound => {
+                    error!("Fan curves file does not exist. Please run setup");
+                    ServiceErrorKind::NeedsIntervention
+                }
+                IOErrorKind::PermissionDenied => ServiceErrorKind::NeedsIntervention,
+                _ => ServiceErrorKind::Recoverable, // assume recoverable, because of spurious I/O errors
+            },
+            "Could not open config file",
+            e,
+        )
+    })?;
     serde_json::from_reader::<_, HashMap<String, PwmCurve>>(&file)
         .map(|mut x| {
             x.shrink_to_fit();
@@ -111,14 +141,25 @@ fn reload_config() -> Result<HashMap<String, PwmCurve>, ServiceError> {
         .map_err(|e| ServiceError::needs_intervention_ctx("Failed to parse config file", e))
 }
 
-fn disable_auto_for_controlled<'a>(controllers: &mut [Box<dyn FanController + 'a>], fan_curves: &HashMap<String, PwmCurve>) {
+fn disable_auto_for_controlled<'a>(
+    controllers: &mut [Box<dyn FanController + 'a>],
+    fan_curves: &HashMap<String, PwmCurve>,
+) {
     'outer: loop {
         // only set fans to manual that are controlled by the given fan curves
-        for p in controllers.iter_mut()
+        for p in controllers
+            .iter_mut()
             .filter(|p| fan_curves.contains_key(p.get_key()))
         {
-            if let Err(e) = p.set_auto(false).and_then(|_| p.write_value(p.get_max_value())) {
-                warn!("Failed to set pwm {} to manual mode. Trying again. Error: {}", p.get_key(), e);
+            if let Err(e) = p
+                .set_auto(false)
+                .and_then(|_| p.write_value(p.get_max_value()))
+            {
+                warn!(
+                    "Failed to set pwm {} to manual mode. Trying again. Error: {}",
+                    p.get_key(),
+                    e
+                );
                 continue 'outer;
             }
         }
@@ -128,35 +169,46 @@ fn disable_auto_for_controlled<'a>(controllers: &mut [Box<dyn FanController + 'a
 
 fn start_inner(context: GlobalContext) -> Result<(), ServiceError> {
     let must_reload_config = Arc::new(AtomicBool::new(false));
-    if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGHUP, must_reload_config.clone()) {
+    if let Err(e) =
+        signal_hook::flag::register(signal_hook::consts::SIGHUP, must_reload_config.clone())
+    {
         error!("Failed to register signal handler for SIGHUP. Config cannot reload. Error {e}")
     }
     let must_exit = Arc::new(AtomicBool::new(false));
     if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGTERM, must_exit.clone()) {
-        error!("Failed to register signal handler for SIGTERM. Exit will not reset to auto. Error {e}")
+        error!(
+            "Failed to register signal handler for SIGTERM. Exit will not reset to auto. Error {e}"
+        )
     }
     if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGINT, must_exit.clone()) {
-        error!("Failed to register signal handler for SIGINT. Exit may not reset to auto. Error {e}")
+        error!(
+            "Failed to register signal handler for SIGINT. Exit may not reset to auto. Error {e}"
+        )
     }
 
     if !fs::exists(CONFIG_PATH.deref()).unwrap_or(false) {
-        fs::create_dir(CONFIG_PATH.deref())
-            .map_err(|e| ServiceError::needs_intervention_ctx("Could not create config directory", e))?;
+        fs::create_dir(CONFIG_PATH.deref()).map_err(|e| {
+            ServiceError::needs_intervention_ctx("Could not create config directory", e)
+        })?;
     }
-    let poll_frequency = env::var(POLL_ENV)
-        .map_or(DEFAULT_POLL_RATE, |v| v.parse().unwrap_or(DEFAULT_POLL_RATE));
+    let poll_frequency = env::var(POLL_ENV).map_or(DEFAULT_POLL_RATE, |v| {
+        v.parse().unwrap_or(DEFAULT_POLL_RATE)
+    });
 
     let mut fan_curves: HashMap<String, PwmCurve> = reload_config()?;
-    
-    let mut state = QueryResult::new();
+
+    let mut state = SensorStorage::new(&context);
     let mut controllers;
     loop {
         match scan_all(&context) {
             Ok(p) => {
                 controllers = p;
                 break;
-            },
-            Err(e) => error!("Failed to find PWM devices. Retrying in 1 second. Error {}", e)
+            }
+            Err(e) => error!(
+                "Failed to find PWM devices. Retrying in 1 second. Error {}",
+                e
+            ),
         }
         sleep(Duration::from_secs(1));
     }
@@ -171,21 +223,26 @@ fn start_inner(context: GlobalContext) -> Result<(), ServiceError> {
             // The strongest possible ordering is Acquire-Release, so I chose it.
             // (an Errored compare_exhange operation [.is_ok() == false] is ignored here, since we can just retry next iteration)
             // My unsureness about this is slightly embarassing, as this was actually a topic in my last semester (which is only a few months ago)
-            if must_reload_config.compare_exchange(true, false, Ordering::AcqRel,Ordering::Relaxed).is_ok() {
+            if must_reload_config
+                .compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+            {
                 fan_curves = reload_config()?;
                 // TODO: Add some system to determine which fans need to be dropped...
                 return_to_auto(&mut controllers_wrapped);
                 disable_auto_for_controlled(&mut controllers_wrapped, &fan_curves);
             }
-            if let Err(e) = query_sensors(&mut state, &context) {
+            if let Err(e) = state.update() {
                 warn!("Failed to query sensor state: {}", e)
             }
-            if let Err(errors) = update_pwms(&state, &mut controllers_wrapped, &fan_curves, &mut |_| {}) {
+            if let Err(errors) =
+                update_pwms(&state, &mut controllers_wrapped, &fan_curves, &mut |_| {})
+            {
                 // I would have preferred cleaner handling
                 let mut output = "[".to_owned();
                 for e in errors {
                     if write!(&mut output, "{},", e).is_err() {
-                        output += &e.to_string()  // Good enough (I don't think this is ever called)
+                        output += &e.to_string() // Good enough (I don't think this is ever called)
                     }
                 }
                 output.push(']');
@@ -202,7 +259,7 @@ const RESTART_WAIT: Duration = Duration::from_secs(2);
 pub fn start() {
     match start_logger() {
         Ok(_) => info!("Hello logging!"),
-        Err(e) => println!("Logging setup failed. Yeesh. {e}")
+        Err(e) => println!("Logging setup failed. Yeesh. {e}"),
     }
 
     loop {
@@ -212,34 +269,41 @@ pub fn start() {
         match catch_unwind(|| start_inner(GlobalContext::init().unwrap())) {
             Ok(Ok(_)) => {
                 info!("Exited regularly");
-                break
-            },
+                break;
+            }
             Ok(Err(e)) => {
                 match e.kind() {
                     ServiceErrorKind::Recoverable => {
-                        error!("Service routine exited with an error. Waiting for a while, then restarting it. Error: {e}");
+                        error!(
+                            "Service routine exited with an error. Waiting for a while, then restarting it. Error: {e}"
+                        );
                         sleep(RESTART_WAIT);
-                    },
+                    }
                     ServiceErrorKind::NeedsIntervention => {
-                        error!("Encountered an error that needs manual intervention. Waiting on reload.\nError: {e}");
-                        let mut hup_listener = Signals::new([signal::SIGHUP, signal::SIGINT, signal::SIGTERM])
-                            .expect("Can't register SIGHUP, SIGINT, SIGTERM handler for reload guard!");
+                        error!(
+                            "Encountered an error that needs manual intervention. Waiting on reload.\nError: {e}"
+                        );
+                        let mut hup_listener =
+                            Signals::new([signal::SIGHUP, signal::SIGINT, signal::SIGTERM]).expect(
+                                "Can't register SIGHUP, SIGINT, SIGTERM handler for reload guard!",
+                            );
                         // Wait for next SIGHUP to continue
-                        match hup_listener.pending()
-                            .chain(hup_listener.forever())
-                            .next()
-                        {
-                            Some(signal::SIGHUP) => { },
+                        match hup_listener.pending().chain(hup_listener.forever()).next() {
+                            Some(signal::SIGHUP) => {}
                             Some(signal::SIGINT | signal::SIGTERM) => {
-                                info!("Received exit signal while waiting on SIGHUP. Exiting normally");
-                                break
-                            },
+                                info!(
+                                    "Received exit signal while waiting on SIGHUP. Exiting normally"
+                                );
+                                break;
+                            }
                             Some(sig) => warn!("Received unexpected signal {sig}. Wtf?"),
-                            None => warn!("Somehow exited signal listener without receiving a signal. Something is off here...")
+                            None => warn!(
+                                "Somehow exited signal listener without receiving a signal. Something is off here..."
+                            ),
                         }
                     }
                 }
-            },
+            }
             Err(_) => {
                 error!("Service panicked! Waiting a while, then attempting a restart.");
                 sleep(RESTART_WAIT);

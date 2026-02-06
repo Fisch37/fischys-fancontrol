@@ -8,13 +8,13 @@ use log::warn;
 
 use crate::commands::characteristics::CharacteristicsArgs;
 
+mod commands;
+pub mod controllers;
+pub mod curves;
 pub mod fan_configuration;
 pub mod fan_discovery;
 pub mod groupie;
-pub mod controllers;
-pub mod curves;
 pub mod utils;
-mod commands;
 
 pub const APP_ID: &str = "fischys-fancontrol";
 pub const POLL_ENV: &str = "POLL_RATE";
@@ -36,7 +36,7 @@ fn path_to_config<P: AsRef<Path> + ?Sized>(subpath: &P) -> PathBuf {
 static mut GLOBAL_CONTEXT_CREATED: bool = false;
 /// This struct is used to store data that needs to be passed throughout the program.
 /// Used instead of statics, to ensure everything that needs to be dropped will be dropped.
-/// 
+///
 /// Note that despite its name this struct does not guarantee its uniqueness.
 /// It is technically possible for the program to create two instances of GlobalContext,
 /// even though there is no reason to do so. If that happens, a warning will be issued.
@@ -52,18 +52,17 @@ impl GlobalContext {
         //  It is technically possible for two threads to create two GlobalContexts at the exact same time.
         //  If that happens, this warning will be omitted and your program will still be slightly bugged silently.
         if unsafe { GLOBAL_CONTEXT_CREATED } {
-            warn!("Two global context structs were created within the program lifetime. This is most likely a bug")
+            warn!(
+                "Two global context structs were created within the program lifetime. This is most likely a bug"
+            )
         }
         Ok(GlobalContext {
             #[cfg(feature = "nvml")]
-            nvml: {
-                nvml_wrapper::Nvml::init()?
-            },
+            nvml: { nvml_wrapper::Nvml::init()? },
             #[cfg(feature = "libsensors")]
-            libsensors: {
-                LibSensors::init()?
-            },
-        }).inspect(|_| unsafe { GLOBAL_CONTEXT_CREATED = true })
+            libsensors: { LibSensors::init()? },
+        })
+        .inspect(|_| unsafe { GLOBAL_CONTEXT_CREATED = true })
     }
 
     #[cfg(feature = "nvml")]

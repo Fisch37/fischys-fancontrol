@@ -4,7 +4,7 @@
     "lldb.dereferencePointers": true,
     "lldb.consoleMode": "evaluate",
     "rust-analyzer.cargo.features": [
-        "libsensors",
-        "nvml"
+        "nvml",
+        "libsensors"
     ]
 }

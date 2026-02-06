@@ -1,4 +1,6 @@
-use std::{array, borrow::Borrow, cmp::Ordering, error::Error, fmt::Display, hash::Hash, mem, ops::{Deref, Index}, rc::Rc, slice::SliceIndex, time::Instant};
+use std::{
+    array, cmp::Ordering, error::Error, fmt::Display, hash::Hash, mem, rc::Rc, time::Instant,
+};
 
 use hashbrown::{Equivalent, HashMap};
 use lazy_static::lazy_static;
@@ -7,11 +9,11 @@ use strum::{EnumCount, EnumIter, VariantArray};
 
 use crate::{GlobalContext, utils::ErrorGroup};
 
-mod nvidia;
-#[cfg(feature = "sensors-cmd")]
-mod lm_sensors;
 #[cfg(feature = "libsensors")]
 mod libsensors;
+#[cfg(feature = "sensors-cmd")]
+mod lm_sensors;
+mod nvidia;
 mod nvml;
 
 pub struct KeyWriter<'a>(&'a str, &'a str);
@@ -24,16 +26,20 @@ impl<'a> Display for KeyWriter<'a> {
 pub trait SensorKey {
     fn get_sensor_key(&self) -> (&str, &str);
 
+    fn get_owned_key(&self) -> OwnedKey {
+        self.get_sensor_key().into()
+    }
+
     fn cmp_by_sensor_key<T: SensorKey>(&self, other: T) -> Ordering {
         let my_key = self.get_sensor_key();
         let other_key = other.get_sensor_key();
         match my_key.0.cmp(other_key.0) {
             Ordering::Equal => my_key.1.cmp(other_key.1),
-            x => x
+            x => x,
         }
     }
 
-    fn display(&self) -> KeyWriter {
+    fn display(&self) -> KeyWriter<'_> {
         let (name, adapter) = self.get_sensor_key();
         KeyWriter(name, adapter)
     }
@@ -57,14 +63,24 @@ impl<T: SensorKey> SensorKey for &T {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct OwnedKey {
-    adapter: String,
-    name: String
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+// Hacky, probably causes an allocation on serialize; fixme?
+#[serde(from = "(String, String)", into = "(String, String)")]
+pub struct OwnedKey {
+    pub adapter: String,
+    pub name: String,
 }
 impl From<(String, String)> for OwnedKey {
     fn from(value: (String, String)) -> Self {
-        OwnedKey { adapter: value.0, name: value.1 }
+        OwnedKey {
+            adapter: value.0,
+            name: value.1,
+        }
+    }
+}
+impl From<OwnedKey> for (String, String) {
+    fn from(value: OwnedKey) -> Self {
+        (value.adapter, value.name)
     }
 }
 impl<'a, 'b> From<(&'a str, &'b str)> for OwnedKey {
@@ -91,7 +107,7 @@ impl Equivalent<OwnedKey> for (&str, &str) {
 #[derive(Debug, Eq)]
 pub struct Adapter {
     pub key: String,
-    pub name: String
+    pub name: String,
 }
 impl PartialEq for Adapter {
     fn eq(&self, other: &Self) -> bool {
@@ -120,8 +136,8 @@ pub struct SensorData<'a> {
     pub input: f64,
     pub min: f64,
     pub max: f64,
-    pub adapter: &'a Adapter,
-    kind: SensorKind
+    pub adapter: Rc<Adapter>,
+    pub kind: SensorKind,
 }
 impl<'a> SensorKey for SensorData<'a> {
     fn get_sensor_key(&self) -> (&str, &str) {
@@ -133,7 +149,7 @@ impl<'a, T: SensorKey> PartialEq<T> for SensorData<'a> {
         self.get_sensor_key() == other.get_sensor_key()
     }
 }
-impl<'a> Eq for SensorData<'a> { }
+impl<'a> Eq for SensorData<'a> {}
 impl<'a, T: SensorKey> PartialOrd<T> for SensorData<'a> {
     fn partial_cmp(&self, other: &T) -> Option<Ordering> {
         Some(self.cmp_by_sensor_key(other))
@@ -151,8 +167,8 @@ impl<'a> From<(&'a Sensor, &SensorState)> for SensorData<'a> {
             input: state.input,
             min: state.min,
             max: state.max,
-            adapter: &sensor.adapter,
-            kind: sensor.kind
+            adapter: sensor.adapter.clone(),
+            kind: sensor.kind,
         }
     }
 }
@@ -163,10 +179,20 @@ impl<'a> From<&'a (Sensor, SensorState)> for SensorData<'a> {
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, Hash)]
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-#[derive(EnumCount, EnumIter)]
-#[derive(Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    EnumCount,
+    EnumIter,
+    Serialize,
+    Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum SensorKind {
     Temperature,
@@ -175,7 +201,7 @@ pub enum SensorKind {
     Power,
     Voltmeter,
     Current,
-    Energy
+    Energy,
 }
 impl Display for SensorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -199,7 +225,7 @@ pub struct SensorState {
     pub max: f64,
     // Using a u32 here ensures our SensorState is 32 bytes long, instead of the 40 if we had used Instant
     /// A monotonic clock value, marking the time at which this state was constructed.
-    pub polled_at: u32
+    pub polled_at: u32,
 }
 impl SensorState {
     #[inline]
@@ -208,8 +234,13 @@ impl SensorState {
             input,
             min,
             max,
-            polled_at: get_monotonic_seconds()
+            polled_at: get_monotonic_seconds(),
         }
+    }
+}
+impl AsRef<SensorState> for SensorState {
+    fn as_ref(&self) -> &SensorState {
+        &self
     }
 }
 
@@ -217,7 +248,7 @@ impl SensorState {
 pub struct Sensor {
     pub name: String,
     pub adapter: Rc<Adapter>,
-    pub kind: SensorKind
+    pub kind: SensorKind,
 }
 impl SensorKey for Sensor {
     fn get_sensor_key(&self) -> (&str, &str) {
@@ -230,7 +261,10 @@ impl SensorKey for Sensor {
 trait SensorPlugin {
     /// Discover all sensors available from this plugin.
     /// This method will generally run exactly once per plugin instance.
-    fn discover_sensors(&mut self, add_fn: &mut dyn FnMut(Sensor) -> Option<Sensor>) -> Result<(), Box<dyn Error>>;
+    fn discover_sensors(
+        &mut self,
+        add_fn: &mut dyn FnMut(Sensor) -> Option<Sensor>,
+    ) -> Result<(), Box<dyn Error>>;
     fn update(&mut self, storage: &mut PluginStorage) -> Result<(), Box<dyn Error>>;
 }
 
@@ -244,35 +278,53 @@ trait SensorPlugin {
 pub struct SensorStorage<'ctx> {
     sensors: [(Box<dyn SensorPlugin + 'ctx>, PluginStorage); GroupiePluginType::COUNT],
     sensor_to_plugin: HashMap<OwnedKey, GroupiePluginType>,
-    has_discovered_sensors: bool
+    has_discovered_sensors: bool,
 }
 impl<'ctx> SensorStorage<'ctx> {
     pub fn new(context: &'ctx GlobalContext) -> Self {
         Self {
-            sensors: array::from_fn(|i| (GroupiePluginType::VARIANTS[i].make_plugin(context), PluginStorage::new())),
+            sensors: array::from_fn(|i| {
+                (
+                    GroupiePluginType::VARIANTS[i].make_plugin(context),
+                    PluginStorage::new(),
+                )
+            }),
             sensor_to_plugin: HashMap::new(),
-            has_discovered_sensors: false
+            has_discovered_sensors: false,
         }
     }
 
-    fn get_plugin(&self, type_: GroupiePluginType) -> &dyn SensorPlugin {
-        self.sensors[type_ as usize].0.as_ref()
+    #[inline]
+    fn get_storage_for<K: SensorKey>(&self, key: K) -> Option<&PluginStorage> {
+        self.sensor_to_plugin
+            .get(&key.get_sensor_key())
+            .map(|plugin| &self.sensors[*plugin as usize].1)
+    }
+
+    pub fn get_sensor<K: SensorKey>(&self, key: K) -> Option<&Sensor> {
+        let key = key.get_sensor_key();
+        self.get_storage_for(key)
+            .and_then(|storage| storage.get_sensor(key))
     }
 
     pub fn get_sensor_data<T: SensorKey>(&self, key: T) -> Option<SensorData<'_>> {
-        todo!()
-    }
-
-    fn get_sensor_state_mut<T: SensorKey>(&mut self, key: T) -> Option<&mut Option<SensorState>> {
-        todo!()
+        let key = key.get_sensor_key();
+        self.get_storage_for(key)
+            .and_then(|storage| storage.get(key))
     }
 
     pub fn update(&mut self) -> Result<(), ErrorGroup> {
         let mut errors = ErrorGroup::new();
         if !self.has_discovered_sensors {
-            for (plugin, plugin_storage) in &mut self.sensors {
-                match plugin.discover_sensors(&mut |sensor| plugin_storage.put_sensor(sensor).map(|(s, _)| s)) {
-                    Ok(_) => { },
+            for (plugin_type, (plugin, plugin_storage)) in
+                GroupiePluginType::VARIANTS.iter().zip(&mut self.sensors)
+            {
+                match plugin.discover_sensors(&mut |sensor| {
+                    self.sensor_to_plugin
+                        .insert(sensor.get_sensor_key().into(), *plugin_type);
+                    plugin_storage.put_sensor(sensor).map(|(s, _)| s)
+                }) {
+                    Ok(_) => {}
                     Err(e) => errors.push_box(e),
                 }
             }
@@ -285,20 +337,38 @@ impl<'ctx> SensorStorage<'ctx> {
         errors.ok()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &PluginStorage> {
-        self.sensors.iter().map(|(_, storage)| storage)
+    /// Iterate over all sensors in an unspecified order.
+    ///
+    /// Note that if you only care about the updated sensors, [`Self::iter_data`] is preferrable.
+    pub fn iter(&self) -> impl Iterator<Item = &(Sensor, Option<SensorState>)> {
+        self.sensors
+            .iter()
+            .map(|(_, storage)| storage)
+            .flat_map(PluginStorage::iter)
+    }
+
+    pub fn iter_sensors(&self) -> impl Iterator<Item = &Sensor> {
+        self.iter().map(|(sensor, _)| sensor)
+    }
+
+    /// Iterate over all sensors that have data in an unspecified order.
+    pub fn iter_data(&self) -> impl Iterator<Item = SensorData<'_>> {
+        self.iter()
+            .filter_map(|(sensor, state)| state.as_ref().map(|state| (sensor, state).into()))
     }
 }
 
 /// A wrapper struct that removes some of the functionalities of the internal HashMap.
 /// Used to ensure plugins cannot mess up the invariants required for internal datastructure integrity.
 pub struct PluginStorage {
-    inner: HashMap<OwnedKey, (Sensor, Option<SensorState>)>
+    inner: HashMap<OwnedKey, (Sensor, Option<SensorState>)>,
 }
 impl PluginStorage {
     /// Create a newly constructed, empty storage.
     pub fn new() -> Self {
-        Self { inner: HashMap::new() }
+        Self {
+            inner: HashMap::new(),
+        }
     }
 
     pub fn trim_to_size(&mut self) {
@@ -318,11 +388,11 @@ impl PluginStorage {
     /// Get the combined state of a sensor on this key, if it is available.
     /// If no sensor for the key exists, or it does not have a state, returns [`None`].
     /// Otherwise, returns a newly constructed [`SensorData`] instance (wrapped in [`Some`]).
-    pub fn get<K: SensorKey>(&self, key: K) -> Option<SensorData> {
+    pub fn get<K: SensorKey>(&self, key: K) -> Option<SensorData<'_>> {
         let (sensor, state) = self.get_raw(&key)?;
         match state {
             &None => None,
-            &Some(ref state) => Some((sensor, state).into())
+            &Some(ref state) => Some((sensor, state).into()),
         }
     }
 
@@ -331,7 +401,8 @@ impl PluginStorage {
         self.get_raw(&key).map(|(sensor, _)| sensor)
     }
     pub fn put_sensor(&mut self, sensor: Sensor) -> Option<(Sensor, Option<SensorState>)> {
-        self.inner.insert(sensor.get_sensor_key().into(), (sensor, None))
+        self.inner
+            .insert(sensor.get_sensor_key().into(), (sensor, None))
     }
 
     /// Returns the state of the sensor referenced by `key`.
@@ -339,27 +410,32 @@ impl PluginStorage {
     pub fn get_state<K: SensorKey>(&self, key: K) -> Option<&SensorState> {
         match self.get_raw(&key)?.1 {
             None => None,
-            Some(ref state) => Some(state)
+            Some(ref state) => Some(state),
         }
     }
     /// Returns a mutbale reference to the state of the sensor referred to by that key, if it exists.
-    /// 
+    ///
     /// Returns [`None`], if no sensor for `key` exists, else a mutable reference to an [`Option<SensorState>`],
     /// allowing you to modify the state or indeed delete it.
     pub fn get_state_mut<K: SensorKey>(&mut self, key: K) -> Option<&mut Option<SensorState>> {
         Some(&mut self.get_raw_mut(&key)?.1)
     }
 
-    pub fn put_state<K: SensorKey>(&mut self, key: K, state: SensorState) -> Result<Option<SensorState>, ()> {
+    pub fn put_state<K: SensorKey>(
+        &mut self,
+        key: K,
+        state: SensorState,
+    ) -> Result<Option<SensorState>, ()> {
         match self.get_state_mut(key) {
-            Some(x) => {
-                Ok(mem::replace(x, Some(state)))
-            },
-            None => Err(())
+            Some(x) => Ok(mem::replace(x, Some(state))),
+            None => Err(()),
         }
     }
 
-    pub fn get_both_mut<K: SensorKey>(&mut self, key: K) -> Option<(&Sensor, &mut Option<SensorState>)> {
+    pub fn get_both_mut<K: SensorKey>(
+        &mut self,
+        key: K,
+    ) -> Option<(&Sensor, &mut Option<SensorState>)> {
         self.get_raw_mut(&key).map(|raw| (&raw.0, &mut raw.1))
     }
 
@@ -369,8 +445,7 @@ impl PluginStorage {
 }
 pub struct SensorIterator<'a, I: Iterator<Item = (&'a OwnedKey, SensorData<'a>)>>(I);
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
-#[derive(strum::EnumCount, strum::VariantArray)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, strum::EnumCount, strum::VariantArray)]
 #[repr(u8)]
 enum GroupiePluginType {
     #[cfg(feature = "sensors-cmd")]
