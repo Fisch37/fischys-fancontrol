@@ -1,8 +1,4 @@
-use std::ops::Deref;
-
-use strum::IntoEnumIterator;
-
-use crate::{GlobalContext, groupie::{QueryResult, SensorKind, query_sensors}};
+use crate::{GlobalContext, groupie::{Adapter, SensorKey, SensorKind, SensorStorage}};
 
 fn format_input(kind: SensorKind, input: f64) -> String {
     match kind {
@@ -23,21 +19,28 @@ pub fn start() {
         .init()
         .unwrap();
     let context = GlobalContext::init().unwrap();
-    let mut state = QueryResult::new();
-    query_sensors(&mut state, &context).unwrap();
-    for kind in SensorKind::iter() {
-        println!("{kind}:");
-        let mut last_adapter = None;
-        for sensor in state.get_of_kind(kind).deref() {
-            if Some(&*sensor.adapter) != last_adapter {
-                println!("{} ({})", sensor.adapter.name, sensor.adapter.key);
-            }
-            println!("\t{:<15} {} (min {}, max {})",
-                sensor.name, format_input(kind, sensor.input),
-                format_input(kind, sensor.min), format_input(kind, sensor.max)
-            );
-            last_adapter = Some(&*sensor.adapter);
+    let mut state = SensorStorage::new(&context);
+    state.update().unwrap();
+    
+    let mut state: Vec<_> = state.iter().flat_map(|s| s.iter()).collect();
+    state.sort_by(|(a, _), (b, _)| a.cmp_by_sensor_key(b));
+
+    let mut last_adapter: Option<&Adapter> = None;
+    for (sensor, state) in &state {
+        if last_adapter.is_none_or(|last_adapter| *last_adapter != *sensor.adapter) {
+            println!("\n{}:", sensor.adapter.name);
+
+            last_adapter = Some(&sensor.adapter);
         }
-        println!();
+
+        println!("{}", sensor.name);
+        match state {
+            None => println!("  N/A"),
+            Some(state) => {
+                println!("  Val: {}", format_input(sensor.kind, state.input));
+                println!("  Min: {}", format_input(sensor.kind, state.min));
+                println!("  Max: {}", format_input(sensor.kind, state.max));
+            }
+        }
     }
 }
