@@ -328,6 +328,7 @@ impl<'ctx> SensorStorage<'ctx> {
                     Err(e) => errors.push_box(e),
                 }
             }
+            self.has_discovered_sensors = true;
         }
         for (plugin, plugin_storage) in &mut self.sensors {
             if let Err(e) = plugin.update(plugin_storage) {
