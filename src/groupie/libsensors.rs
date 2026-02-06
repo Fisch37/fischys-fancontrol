@@ -1,9 +1,11 @@
+#![cfg(feature = "libsensors")]
+
 use std::{rc::Rc, str::Utf8Error};
 
-use libsensors_rs::{Chip, Feature, GenericSubfeature, LibSensors, feature::FeatureType};
+use libsensors_rs::{Chip, Feature, GenericSubfeature, LibSensors, Subfeature, feature::FeatureType, error::Error as LibsensorsError};
 use log::debug;
 
-use crate::{eg_push_and_continue, groupie::{Adapter, PluginStorage, Sensor, SensorKey, SensorKind, SensorPlugin, SensorState}, utils::{ErrorGroup, SimpleError}};
+use crate::{eg_push_and_continue, groupie::{Adapter, OwnedKey, PluginStorage, Sensor, SensorKey, SensorKind, SensorPlugin, SensorState}, utils::{ErrorGroup, SimpleError}};
 
 pub fn chip_key(chip: &Chip) -> Result<String, Utf8Error> {
     Ok(format!(
@@ -16,15 +18,16 @@ pub fn chip_key(chip: &Chip) -> Result<String, Utf8Error> {
 }
 
 pub struct LibsensorsPlugin<'ctx> {
-    libsensors: &'ctx LibSensors
+    libsensors: &'ctx LibSensors,
+    registered_sensors: Vec<LibsensorsSensorInfo<'ctx>>
 }
 impl<'ctx> LibsensorsPlugin<'ctx> {
     pub fn new(libsensors: &'ctx LibSensors) -> Self {
-        Self { libsensors }
+        Self { libsensors, registered_sensors: Vec::new() }
     }
 }
 impl<'ctx> SensorPlugin for LibsensorsPlugin<'ctx> {
-    fn discover_sensors(&mut self, add_fn: fn(Sensor) -> Option<Sensor>) -> Result<(), Box<dyn std::error::Error>> {
+    fn discover_sensors(&mut self, add_fn: &mut dyn FnMut(Sensor) -> Option<Sensor>) -> Result<(), Box<dyn std::error::Error>> {
         let mut error_group = ErrorGroup::new();
         let mut chip_iterator = self.libsensors.get_chips()?;
         while let Some(chip) = error_group.push_until_ok(&mut chip_iterator) {
@@ -38,11 +41,13 @@ impl<'ctx> SensorPlugin for LibsensorsPlugin<'ctx> {
             let mut feature_it = eg_push_and_continue!(error_group, chip.get_features());
             while let Some(feature) = error_group.push_until_ok(&mut feature_it) {
                 let feature_label = eg_push_and_continue!(error_group, feature.get_label());
-                let sensor_kind = eg_push_and_continue!(
-                    error_group,
-                    sensor_kind_from_feature_type(feature.get_type())
-                        .ok_or_else(|| SimpleError::new(format!("Sensor of unknown kind {adapter}/{feature_label}")))
-                );
+                let sensor_kind = match sensor_kind_from_feature_type(feature.get_type()) {
+                    Some(x) => x,
+                    None => {
+                        debug!("Skipping sensor of unknown kind {adapter}/{feature_label}");
+                        continue;
+                    }
+                };
 
                 let input_subtype = match GenericSubfeature::Input.to_primitive(feature.get_type()) {
                     Some(x) => x,
@@ -51,15 +56,36 @@ impl<'ctx> SensorPlugin for LibsensorsPlugin<'ctx> {
                         continue;
                     }
                 };
-                if eg_push_and_continue!(error_group, feature.get_subfeature_by_type(input_subtype)).is_none() {
-                    debug!("Sensor {adapter}/{feature_label} has no input subtype, skipping it.");
-                    continue;
-                }
+                let input_subfeature = match eg_push_and_continue!(error_group, feature.get_subfeature_by_type(input_subtype)) {
+                    Some(x) => x,
+                    None => {
+                        debug!("Sensor {adapter}/{feature_label} has no input subtype. Skipping it.");
+                        continue;
+                    }
+                };
+                let min_subfeature = eg_push_and_continue!(
+                    error_group,
+                    try_get_subfeature(&feature, GenericSubfeature::Min)
+                );
+                let max_subfeature = eg_push_and_continue!(
+                    error_group,
+                    try_get_subfeature(&feature, GenericSubfeature::Max)
+                );
 
-                add_fn(Sensor {
+                let sensor = Sensor {
                     name: feature_label,
                     adapter: adapter.clone(),
                     kind: sensor_kind
+                };
+                let key: OwnedKey = sensor.get_sensor_key().into();
+                add_fn(sensor);
+                self.registered_sensors.push(LibsensorsSensorInfo {
+                    key,
+                    subfeatures: SubfeatureArray {
+                        input: input_subfeature,
+                        min: min_subfeature,
+                        max: max_subfeature
+                    }
                 });
             }
         }
@@ -68,52 +94,40 @@ impl<'ctx> SensorPlugin for LibsensorsPlugin<'ctx> {
 
     fn update(&mut self, storage: &mut PluginStorage) -> Result<(), Box<dyn std::error::Error>> {
         let mut error_group = ErrorGroup::new();
-        let mut chip_iterator = self.libsensors.get_chips()?;
-        while let Some(chip) = error_group.push_until_ok(&mut chip_iterator) {
-            let chip_key = eg_push_and_continue!(error_group, chip_key(&chip));
+        
+        for sensor in &self.registered_sensors {
+            const MAX_DEFAULT: f64 = f64::INFINITY;
+            const MIN_DEFAULT: f64 = -f64::INFINITY;
+            let input = eg_push_and_continue!(error_group, sensor.subfeatures.input.get_value());
+            let max = match &sensor.subfeatures.max {
+                None => Ok(MAX_DEFAULT),
+                Some(x) => x.get_value()
+            }.unwrap_or_else(|e| { error_group.push(e); MAX_DEFAULT });
+            let min = match &sensor.subfeatures.min {
+                None => Ok(MIN_DEFAULT),
+                Some(x) => x.get_value()
+            }.unwrap_or_else(|e| { error_group.push(e); MIN_DEFAULT });
 
-            let mut feature_it = eg_push_and_continue!(error_group, chip.get_features());
-            while let Some(feature) = error_group.push_until_ok(&mut feature_it) {
-                let feature_label = eg_push_and_continue!(error_group, feature.get_label());
-                
-                if let Some((sensor, state)) = storage.get_both_mut((&chip_key, &feature_label)) {
-                    let input_subfeature = eg_push_and_continue!(
-                        error_group,
-                        GenericSubfeature::Input.to_primitive(feature.get_type())
-                            .ok_or_else(|| SimpleError::new(
-                                format!("Input subfeature type for sensor {} was available at discovery, but disappeared at update. How can this even happen?", sensor.display())
-                            ))
-                    );
-                    let input_subfeature = eg_push_and_continue!(
-                        error_group,
-                        eg_push_and_continue!(
-                            error_group,
-                            feature.get_subfeature_by_type(input_subfeature)
-                        ).ok_or_else(|| {
-                            SimpleError::new(format!("Input subfeature does not exist for sensor {}", sensor.display()))
-                        })
-                    );
-
-                    *state = Some(SensorState::new(
-                        eg_push_and_continue!(error_group, input_subfeature.get_value()),
-                        try_read_subfeature(
-                            &feature,
-                            GenericSubfeature::Min,
-                            -f64::INFINITY
-                        ),
-                        try_read_subfeature(
-                            &feature,
-                            GenericSubfeature::Max,
-                            f64::INFINITY
-                        )
-                    ));
-                }
-            }
+            match storage.put_state(&sensor.key, SensorState::new(input, min, max)) {
+                Ok(_) => { },
+                Err(()) => error_group.push(SimpleError::new(format!("Could not find a sensor {} in storage, even though libsensors registered it.", sensor.key.display())))
+            };
         }
+
         Ok(error_group.ok()?)
     }
 }
 
+fn try_get_subfeature<'a>(feature: &Feature<'a>, subfeature: GenericSubfeature) -> Result<Option<Subfeature<'a>>, LibsensorsError> {
+    /*
+    None -> Ok(None)
+    Some(Ok(x)) -> Ok(x)
+    Some(Err(x)) -> Err(x)
+    */
+    subfeature.to_primitive(feature.get_type())
+        .map(|subfeature_type| feature.get_subfeature_by_type(subfeature_type))
+        .unwrap_or(Ok(None))
+}
 
 fn sensor_kind_from_feature_type(feature_type: FeatureType) -> Option<SensorKind> {
     use FeatureType::*;
@@ -128,15 +142,13 @@ fn sensor_kind_from_feature_type(feature_type: FeatureType) -> Option<SensorKind
     })
 }
 
-fn try_read_subfeature(feature: &Feature, subfeature_type: GenericSubfeature, default: f64) -> f64 {
-    subfeature_type.to_primitive(feature.get_type())
-        .and_then(|specific_type| {
-            feature.get_subfeature_by_type(specific_type).ok()
-                .and_then(|s| s)
-                .and_then(|s| s.get_value().ok())
-        })
-        .unwrap_or_else(|| {
-            debug!("Failed to grab subfeature {subfeature_type:?}. Failing quietly");
-            default
-        })
+struct LibsensorsSensorInfo<'lib> {
+    key: OwnedKey,
+    subfeatures: SubfeatureArray<'lib>
+}
+
+struct SubfeatureArray<'lib> {
+    input: Subfeature<'lib>,
+    min: Option<Subfeature<'lib>>,
+    max: Option<Subfeature<'lib>>
 }

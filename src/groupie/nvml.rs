@@ -15,37 +15,65 @@ use crate::eg_push_and_continue;
 use crate::groupie::{Adapter, OwnedKey, PluginStorage, Sensor, SensorKey, SensorKind, SensorPlugin, SensorState};
 use crate::utils::ErrorGroup;
 
-type NvmlQueryFn = &'static dyn Fn(&Device) -> Result<u32, NvmlError>;
+// Result<u32> is a dirty hack, because we really don't care about the type
+// and our calls (so far) happen to return u32
+type NvmlQueryFn<'a> = &'a dyn Fn(&Device) -> Result<f64, NvmlError>;
+type OwnedNvmlQueryFn = Box<dyn Fn(&Device) -> Result<f64, NvmlError>>;
 
-fn nvml_always<const X: u32>(_: &Device) -> Result<u32, NvmlError> {
-    Ok(X)
+const fn nvml_0(_: &Device) -> Result<f64, NvmlError> {
+    Ok(0.0)
 }
 
-fn nvml_core_temp(device: &Device) -> Result<u32, NvmlError> {
+const fn nvml_inf(_: &Device) -> Result<f64, NvmlError> {
+    Ok(f64::INFINITY)
+}
+
+fn nvml_core_temp(device: &Device) -> Result<f64, NvmlError> {
     device.temperature(TemperatureSensor::Gpu)
+        .map(Into::into)
 }
 
-fn nvml_power_usage(device: &Device) -> Result<u32, NvmlError> {
-    device.power_usage()
+const POWER_SCALER: f64 = 1e-3;
+fn nvml_power_usage(device: &Device) -> Result<f64, NvmlError> {
+    device.power_usage().map(|p| p as f64 * POWER_SCALER)
 }
 
-fn nvml_power_usage_max(device: &Device) -> Result<u32, NvmlError> {
-    device.enforced_power_limit()
+fn nvml_power_usage_max(device: &Device) -> Result<f64, NvmlError> {
+    device.enforced_power_limit().map(|p| p as f64 * POWER_SCALER)
 }
 
 
 pub struct NvmlPlugin<'nvml> {
     nvml: &'nvml Nvml,
-    registered_sensors: Vec<SensorCallbacks>,
+    registered_sensors: Vec<NvmlSensorInfo>,
     used_devices: HashMap<String, Device<'nvml>>
 }
 impl<'nvml> NvmlPlugin<'nvml> {
     pub fn new(nvml: &'nvml Nvml) -> Self {
         Self { nvml, registered_sensors: Vec::new(), used_devices: HashMap::new() }
     }
+
+    #[inline]
+    fn add_sensor(
+        &mut self,
+        callbacks: SensorCallbacks,
+        name: String,
+        adapter: &Rc<Adapter>,
+        kind: SensorKind,
+        add_fn: &mut dyn FnMut(Sensor) -> Option<Sensor>
+    ) {
+        let sensor = Sensor {
+            adapter: adapter.clone(),
+            name: name,
+            kind
+        };
+        let key: OwnedKey = sensor.get_sensor_key().into();
+        add_fn(sensor);
+        self.registered_sensors.push(NvmlSensorInfo { key, callbacks });
+    }
 }
 impl<'nvml> SensorPlugin for NvmlPlugin<'nvml> {
-    fn discover_sensors(&mut self, add_fn: fn(Sensor) -> Option<Sensor>) -> Result<(), Box<dyn std::error::Error>> {
+    fn discover_sensors(&mut self, add_fn: &mut dyn FnMut(Sensor) -> Option<Sensor>) -> Result<(), Box<dyn std::error::Error>> {
         let mut error_group = ErrorGroup::new();
         
         let mut device_it = self.nvml.get_devices()?;
@@ -61,31 +89,6 @@ impl<'nvml> SensorPlugin for NvmlPlugin<'nvml> {
                         })
                     })
             );
-            // Result<u32> is a dirty hack, because we really don't care about the type
-            // and our calls (so far) happen to return u32
-            let mut add_if_supported = |
-                input_fn: NvmlQueryFn,
-                max_fn: NvmlQueryFn,
-                min_fn: NvmlQueryFn,
-                name: &str,
-                kind: SensorKind
-            | {
-                if is_supported(input_fn(&device)) {
-                    let sensor = Sensor {
-                        adapter: adapter.clone(),
-                        name: name.to_string(),
-                        kind
-                    };
-                    let key: OwnedKey = sensor.get_sensor_key().into();
-                    add_fn(sensor);
-                    self.registered_sensors.push(SensorCallbacks {
-                        key,
-                        input: input_fn,
-                        max: max_fn,
-                        min: min_fn
-                    });
-                }
-            };
 
             let fan_count = eg_push_and_continue!(
                 error_group,
@@ -96,27 +99,47 @@ impl<'nvml> SensorPlugin for NvmlPlugin<'nvml> {
                     })
             );
             for fan_idx in 0..fan_count {
-                add_fn(Sensor {
-                    adapter: adapter.clone(),
-                    name: format!("fan{fan_idx}"),
-                    kind: SensorKind::Fan
-                });
+                self.add_sensor(
+                    OwnedSensorCallbacks {
+                        input: Box::new(move |device: &Device<'_>| device.fan_speed_rpm(fan_idx).map(Into::into)),
+                        // Boxing two static functions here is less than beautiful
+                        // fixme?
+                        min: Box::new(nvml_0),
+                        max: Box::new(nvml_inf)
+                    }.into(),
+                    format!("fan{fan_idx}"),
+                    &adapter,
+                    SensorKind::Fan,
+                    add_fn
+                );
             }
 
-            add_if_supported(
-                &nvml_power_usage,
-                &nvml_power_usage_max,
-                &nvml_always::<0>,
-                "power",
-                SensorKind::Power
-            );
-            add_if_supported(
-                &nvml_core_temp,
-                &nvml_always::<0>,
-                &nvml_always::<{ u32::MAX }>,
-                "gpu_temperature",
-                SensorKind::Temperature
-            );
+            if is_supported(nvml_power_usage(&device)) {
+                self.add_sensor(
+                    BorrowedSensorCallbacks {
+                        input: &nvml_power_usage,
+                        max: &nvml_power_usage_max,
+                        min: &nvml_0
+                    }.into(),
+                    "power".to_string(),
+                    &adapter,
+                    SensorKind::Power,
+                    add_fn
+                );
+            }
+            if is_supported(nvml_core_temp(&device)) {
+                self.add_sensor(
+                    BorrowedSensorCallbacks {
+                        input: &nvml_core_temp,
+                        max: &nvml_inf,
+                        min: &nvml_0
+                    }.into(),
+                    "gpu_temperature".to_string(),
+                    &adapter,
+                    SensorKind::Temperature,
+                    add_fn
+                )
+            }
             self.used_devices.insert(uuid, device);
         }
 
@@ -125,33 +148,26 @@ impl<'nvml> SensorPlugin for NvmlPlugin<'nvml> {
 
     fn update(&mut self, storage: &mut PluginStorage) -> Result<(), Box<dyn std::error::Error>> {
         let mut error_group = ErrorGroup::new();
-        for callbacks in self.registered_sensors.iter() {
-            let device = match self.used_devices.get(&callbacks.key.adapter) {
+        for sensor_info in self.registered_sensors.iter() {
+            let device = match self.used_devices.get(&sensor_info.key.adapter) {
                 Some(x) => x,
                 None => {
-                    warn!("Could not find device for sensor {}", callbacks.key);
+                    warn!("Could not find device for sensor {}", sensor_info.key);
                     continue;
                 }
             };
+            let callbacks = sensor_info.callbacks.borrowed();
             let input = eg_push_and_continue!(error_group, (*callbacks.input)(device));
             let min = eg_push_and_continue!(error_group, (*callbacks.min)(device));
             let max = eg_push_and_continue!(error_group, (*callbacks.max)(device));
             
-            // Dirty hack to scale power ratings from milliwatts to watts
-            let scaler = match storage.get_sensor(&callbacks.key) {
-                Some(x) if x.kind == SensorKind::Power => 1e-3,
-                _ => 1.0
-            };
-            storage.put_state(
-                &callbacks.key,
-                SensorState::new(
-                    input as f64 * scaler,
-                    min as f64 * scaler,
-                    max as f64 * scaler
-                )
-            ).inspect_err(|_| {
-                warn!("Could not find sensor {} in plugin storage, but it exists in NvmlPlugin registry", &callbacks.key)
-            });
+            match storage.put_state(
+                &sensor_info.key,
+                SensorState::new(input, min, max)
+            ) {
+                Ok(_) => { },
+                Err(_) => warn!("Could not find sensor {} in plugin storage, but it exists in NvmlPlugin registry", &sensor_info.key)
+            }
         }
         Ok(error_group.ok()?)
     }
@@ -162,10 +178,52 @@ fn is_supported<T>(r: Result<T, NvmlError>) -> bool {
     !r.is_err_and(|e| discriminant(&e) == discriminant(&NvmlError::NotSupported))
 }
 
-struct SensorCallbacks {
+struct NvmlSensorInfo {
     key: OwnedKey,
+    callbacks: SensorCallbacks
+}
+enum SensorCallbacks {
+    Static(BorrowedSensorCallbacks<'static>),
+    Dynamic(OwnedSensorCallbacks)
+}
+impl SensorCallbacks {
+    pub fn borrowed(&self) -> BorrowedSensorCallbacks<'_> {
+        match self {
+            Self::Static(c) => c.clone(),
+            Self::Dynamic(c) => c.into()
+        }
+    }
+}
+impl From<BorrowedSensorCallbacks<'static>> for SensorCallbacks {
+    fn from(value: BorrowedSensorCallbacks<'static>) -> Self {
+        Self::Static(value)
+    }
+}
+impl From<OwnedSensorCallbacks> for SensorCallbacks {
+    fn from(value: OwnedSensorCallbacks) -> Self {
+        Self::Dynamic(value)
+    }
+}
+
+#[derive(Clone)]
+struct BorrowedSensorCallbacks<'a> {
     // We're going to be in real trouble if Nvidia decides to make anything not u32
-    input: NvmlQueryFn,
-    max: NvmlQueryFn,
-    min: NvmlQueryFn
+    input: NvmlQueryFn<'a>,
+    max: NvmlQueryFn<'a>,
+    min: NvmlQueryFn<'a>
+}
+
+struct OwnedSensorCallbacks {
+    input: OwnedNvmlQueryFn,
+    max: OwnedNvmlQueryFn,
+    min: OwnedNvmlQueryFn
+}
+impl<'a> From<&'a OwnedSensorCallbacks> for BorrowedSensorCallbacks<'a> {
+    fn from(value: &'a OwnedSensorCallbacks) -> Self {
+        BorrowedSensorCallbacks {
+            input: &value.input,
+            max: &value.max,
+            min: &value.min
+        }
+    }
 }

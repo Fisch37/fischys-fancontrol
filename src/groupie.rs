@@ -156,6 +156,11 @@ impl<'a> From<(&'a Sensor, &SensorState)> for SensorData<'a> {
         }
     }
 }
+impl<'a> From<&'a (Sensor, SensorState)> for SensorData<'a> {
+    fn from(value: &'a (Sensor, SensorState)) -> Self {
+        Self::from((&value.0, &value.1))
+    }
+}
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, Hash)]
@@ -188,13 +193,13 @@ fn get_monotonic_seconds() -> u32 {
 }
 
 #[derive(Debug, Clone)]
-struct SensorState {
-    input: f64,
-    min: f64,
-    max: f64,
+pub struct SensorState {
+    pub input: f64,
+    pub min: f64,
+    pub max: f64,
     // Using a u32 here ensures our SensorState is 32 bytes long, instead of the 40 if we had used Instant
     /// A monotonic clock value, marking the time at which this state was constructed.
-    polled_at: u32
+    pub polled_at: u32
 }
 impl SensorState {
     #[inline]
@@ -209,10 +214,10 @@ impl SensorState {
 }
 
 #[derive(Debug, Clone)]
-struct Sensor {
-    name: String,
-    adapter: Rc<Adapter>,
-    kind: SensorKind
+pub struct Sensor {
+    pub name: String,
+    pub adapter: Rc<Adapter>,
+    pub kind: SensorKind
 }
 impl SensorKey for Sensor {
     fn get_sensor_key(&self) -> (&str, &str) {
@@ -225,7 +230,7 @@ impl SensorKey for Sensor {
 trait SensorPlugin {
     /// Discover all sensors available from this plugin.
     /// This method will generally run exactly once per plugin instance.
-    fn discover_sensors(&mut self, add_fn: fn(Sensor) -> Option<Sensor>) -> Result<(), Box<dyn Error>>;
+    fn discover_sensors(&mut self, add_fn: &mut dyn FnMut(Sensor) -> Option<Sensor>) -> Result<(), Box<dyn Error>>;
     fn update(&mut self, storage: &mut PluginStorage) -> Result<(), Box<dyn Error>>;
 }
 
@@ -238,13 +243,15 @@ trait SensorPlugin {
 ///   - Access to all sensors by plugin for plugin updates
 pub struct SensorStorage<'ctx> {
     sensors: [(Box<dyn SensorPlugin + 'ctx>, PluginStorage); GroupiePluginType::COUNT],
-    sensor_to_plugin: HashMap<OwnedKey, GroupiePluginType>
+    sensor_to_plugin: HashMap<OwnedKey, GroupiePluginType>,
+    has_discovered_sensors: bool
 }
 impl<'ctx> SensorStorage<'ctx> {
     pub fn new(context: &'ctx GlobalContext) -> Self {
         Self {
             sensors: array::from_fn(|i| (GroupiePluginType::VARIANTS[i].make_plugin(context), PluginStorage::new())),
-            sensor_to_plugin: HashMap::new()
+            sensor_to_plugin: HashMap::new(),
+            has_discovered_sensors: false
         }
     }
 
@@ -262,6 +269,14 @@ impl<'ctx> SensorStorage<'ctx> {
 
     pub fn update(&mut self) -> Result<(), ErrorGroup> {
         let mut errors = ErrorGroup::new();
+        if !self.has_discovered_sensors {
+            for (plugin, plugin_storage) in &mut self.sensors {
+                match plugin.discover_sensors(&mut |sensor| plugin_storage.put_sensor(sensor).map(|(s, _)| s)) {
+                    Ok(_) => { },
+                    Err(e) => errors.push_box(e),
+                }
+            }
+        }
         for (plugin, plugin_storage) in &mut self.sensors {
             if let Err(e) = plugin.update(plugin_storage) {
                 errors.push_box(e);
@@ -269,11 +284,15 @@ impl<'ctx> SensorStorage<'ctx> {
         }
         errors.ok()
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &PluginStorage> {
+        self.sensors.iter().map(|(_, storage)| storage)
+    }
 }
 
 /// A wrapper struct that removes some of the functionalities of the internal HashMap.
 /// Used to ensure plugins cannot mess up the invariants required for internal datastructure integrity.
-struct PluginStorage {
+pub struct PluginStorage {
     inner: HashMap<OwnedKey, (Sensor, Option<SensorState>)>
 }
 impl PluginStorage {
@@ -311,6 +330,9 @@ impl PluginStorage {
     pub fn get_sensor<K: SensorKey>(&self, key: K) -> Option<&Sensor> {
         self.get_raw(&key).map(|(sensor, _)| sensor)
     }
+    pub fn put_sensor(&mut self, sensor: Sensor) -> Option<(Sensor, Option<SensorState>)> {
+        self.inner.insert(sensor.get_sensor_key().into(), (sensor, None))
+    }
 
     /// Returns the state of the sensor referenced by `key`.
     /// Returns [`None`] if the sensor does not exist, or it does not have a key.
@@ -340,7 +362,12 @@ impl PluginStorage {
     pub fn get_both_mut<K: SensorKey>(&mut self, key: K) -> Option<(&Sensor, &mut Option<SensorState>)> {
         self.get_raw_mut(&key).map(|raw| (&raw.0, &mut raw.1))
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &(Sensor, Option<SensorState>)> {
+        self.inner.values()
+    }
 }
+pub struct SensorIterator<'a, I: Iterator<Item = (&'a OwnedKey, SensorData<'a>)>>(I);
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 #[derive(strum::EnumCount, strum::VariantArray)]
