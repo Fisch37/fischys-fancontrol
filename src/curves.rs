@@ -3,7 +3,7 @@ use std::{collections::HashMap, error::Error, hash::Hash};
 use log::{info, log_enabled, warn};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{controllers::FanController, groupie::{QueryResult, SensorKind}, utils::SimpleError};
+use crate::{controllers::FanController, groupie::{SensorKey, SensorKind, SensorStorage}, utils::SimpleError};
 
 fn f64_avg<I: IntoIterator<Item = f64>>(iterator: I) -> f64 {
     let mut sum: f64 = 0.0;
@@ -35,11 +35,10 @@ fn f64_median<I: IntoIterator<Item = f64>>(iterator: I) -> Option<f64> {
 }
 
 const fn f64_1() -> f64 { 1.0 }
-const fn default_sensor_kind() -> SensorKind { SensorKind::Temperature }
 const fn default_curve_mode() -> CurveMode { CurveMode::LinearInterpolation }
 
-trait PwmControl : std::fmt::Debug {
-    fn evaluate(&self, state: &QueryResult) -> Option<f64>;
+trait PwmControl: std::fmt::Debug {
+    fn evaluate(&self, state: &SensorStorage) -> Option<f64>;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -48,9 +47,12 @@ pub struct SingleSensorControl {
     pub adapter: String,
     pub sensor: String,
     #[serde(default = "f64_1")]
-    pub factor: f64,
-    #[serde(default = "default_sensor_kind")]
-    pub sensor_kind: SensorKind
+    pub factor: f64
+}
+impl SensorKey for SingleSensorControl {
+    fn get_sensor_key(&self) -> (&str, &str) {
+        (&self.adapter, &self.sensor)
+    }
 }
 impl Hash for SingleSensorControl {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -66,9 +68,8 @@ impl PartialEq for SingleSensorControl {
 }
 impl Eq for SingleSensorControl { }
 impl PwmControl for SingleSensorControl {
-    fn evaluate(&self, state: &QueryResult) -> Option<f64> {
-        let sensors = state.get_of_kind(self.sensor_kind);
-        sensors.get_from_parts(&self.adapter, &self.sensor)
+    fn evaluate(&self, state: &SensorStorage) -> Option<f64> {
+        state.get_sensor_data(self)
             .map(|sensor| self.factor*sensor.input)
     }
 }
@@ -85,7 +86,7 @@ pub enum SensorMergeOperation {
     MIN, MAX, AVERAGE, MEDIAN
 }
 impl PwmControl for MultiSensorControl {
-    fn evaluate(&self, state: &QueryResult) -> Option<f64> {
+    fn evaluate(&self, state: &SensorStorage) -> Option<f64> {
         let chosen_sensors = self.sensors.iter()
             // FIXME: Replace this with fail-fast semantics.
             //  (Should return None if any of the control.evaluate calls returned None)
@@ -108,7 +109,7 @@ pub enum SensorControl {
     Literal { value: f64 }
 }
 impl PwmControl for SensorControl {
-    fn evaluate(&self,state: &QueryResult) -> Option<f64>  {
+    fn evaluate(&self,state: &SensorStorage) -> Option<f64>  {
         match self {
             Self::Single(x) => x.evaluate(state),
             Self::Multi(x) => x.evaluate(state),
@@ -145,7 +146,7 @@ impl CurveMode {
 }
 
 pub fn update_pwms<'a, U, C: AsMut<dyn FanController + 'a>>(
-    state: &QueryResult,
+    state: &SensorStorage,
     pwms: &mut [C],
     curves: &HashMap<String, PwmCurve>,
     for_each_update: &mut U
