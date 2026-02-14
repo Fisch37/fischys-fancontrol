@@ -1,5 +1,5 @@
 use std::{
-    array, cmp::Ordering, error::Error, fmt::Display, hash::Hash, mem, rc::Rc, time::Instant,
+    array, cmp::Ordering, error::Error, fmt::Display, hash::Hash, rc::Rc, time::Instant,
 };
 
 use hashbrown::{Equivalent, HashMap};
@@ -141,7 +141,7 @@ pub struct SensorData<'a> {
 }
 impl<'a> SensorKey for SensorData<'a> {
     fn get_sensor_key(&self) -> (&str, &str) {
-        (&self.adapter.key, &self.name)
+        (&self.adapter.key, self.name)
     }
 }
 impl<'a, T: SensorKey> PartialEq<T> for SensorData<'a> {
@@ -240,7 +240,7 @@ impl SensorState {
 }
 impl AsRef<SensorState> for SensorState {
     fn as_ref(&self) -> &SensorState {
-        &self
+        self
     }
 }
 
@@ -391,10 +391,7 @@ impl PluginStorage {
     /// Otherwise, returns a newly constructed [`SensorData`] instance (wrapped in [`Some`]).
     pub fn get<K: SensorKey>(&self, key: K) -> Option<SensorData<'_>> {
         let (sensor, state) = self.get_raw(&key)?;
-        match state {
-            &None => None,
-            &Some(ref state) => Some((sensor, state).into()),
-        }
+        state.as_ref().map(|state| (sensor, state).into())
     }
 
     /// Returns the sensor metadata, if a sensor for that key exists.
@@ -409,10 +406,7 @@ impl PluginStorage {
     /// Returns the state of the sensor referenced by `key`.
     /// Returns [`None`] if the sensor does not exist, or it does not have a key.
     pub fn get_state<K: SensorKey>(&self, key: K) -> Option<&SensorState> {
-        match self.get_raw(&key)?.1 {
-            None => None,
-            Some(ref state) => Some(state),
-        }
+        self.get_raw(&key)?.1.as_ref()
     }
     /// Returns a mutbale reference to the state of the sensor referred to by that key, if it exists.
     ///
@@ -426,10 +420,10 @@ impl PluginStorage {
         &mut self,
         key: K,
         state: SensorState,
-    ) -> Result<Option<SensorState>, ()> {
+    ) -> Result<Option<SensorState>, SensorState> {
         match self.get_state_mut(key) {
-            Some(x) => Ok(mem::replace(x, Some(state))),
-            None => Err(()),
+            Some(x) => Ok(x.replace(state)),
+            None => Err(state),
         }
     }
 
@@ -442,6 +436,11 @@ impl PluginStorage {
 
     pub fn iter(&self) -> impl Iterator<Item = &(Sensor, Option<SensorState>)> {
         self.inner.values()
+    }
+}
+impl Default for PluginStorage {
+    fn default() -> Self {
+        Self::new()
     }
 }
 pub struct SensorIterator<'a, I: Iterator<Item = (&'a OwnedKey, SensorData<'a>)>>(I);

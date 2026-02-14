@@ -69,7 +69,7 @@ impl<'nvml> NvmlPlugin<'nvml> {
     ) {
         let sensor = Sensor {
             adapter: adapter.clone(),
-            name: name,
+            name,
             kind,
         };
         let key: OwnedKey = sensor.get_sensor_key().into();
@@ -93,7 +93,7 @@ impl<'nvml> SensorPlugin for NvmlPlugin<'nvml> {
                 device.name().map(|name| {
                     Rc::new(Adapter {
                         key: uuid.clone(),
-                        name: name,
+                        name,
                     })
                 })
             );

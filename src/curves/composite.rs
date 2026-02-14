@@ -18,12 +18,7 @@ impl PwmControl for MultiSensorControl {
             // FIXME: Replace this with fail-fast semantics.
             //  (Should return None if any of the control.evaluate calls returned None)
             .filter_map(|control| control.evaluate(state));
-        match self.operation {
-            SensorMergeOperation::MIN => chosen_sensors.reduce(f64::min),
-            SensorMergeOperation::MAX => chosen_sensors.reduce(f64::max),
-            SensorMergeOperation::AVERAGE => Some(f64_avg(chosen_sensors)),
-            SensorMergeOperation::MEDIAN => f64_median(chosen_sensors),
-        }
+        self.operation.reduce(chosen_sensors)
     }
 }
 
@@ -34,4 +29,20 @@ pub enum SensorMergeOperation {
     MAX,
     AVERAGE,
     MEDIAN,
+    SUM,
+    // I doubt anybody actually wants this
+    PRODUCT
+}
+impl SensorMergeOperation {
+    pub fn reduce(self, values: impl IntoIterator<Item = f64>) -> Option<f64> {
+        let values = values.into_iter();
+        match self {
+            Self::MIN => values.reduce(f64::min),
+            Self::MAX => values.reduce(f64::max),
+            Self::AVERAGE => Some(f64_avg(values)),
+            Self::MEDIAN => f64_median(values),
+            Self::SUM => Some(values.sum()),
+            Self::PRODUCT => Some(values.product())
+        }
+    }
 }

@@ -77,7 +77,7 @@ pub struct ErrorGroup {
 }
 impl Display for ErrorGroup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut res = write!(f, "ErrorGroup[\n");
+        let mut res = writeln!(f, "ErrorGroup[");
         for e in &self.errors {
             res = res.and(write!(f, "  - {e},"));
         }
@@ -122,7 +122,7 @@ impl ErrorGroup {
         I: Iterator<Item = Result<T, E>>,
         E: Error + 'static,
     {
-        while let Some(result) = it.next() {
+        for result in it.by_ref() {
             match result {
                 Ok(t) => return Some(t),
                 Err(e) => self.push(e),
@@ -171,7 +171,7 @@ impl<'e, I: Iterator<Item = Result<T, E>>, T, E: Error + 'static> Iterator
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(result) = self.it.next() {
+        for result in self.it.by_ref() {
             match result {
                 Ok(t) => return Some(t),
                 Err(e) => self.target.push(e),

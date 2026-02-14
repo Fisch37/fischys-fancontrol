@@ -144,7 +144,7 @@ impl<'ctx> SensorPlugin for LibsensorsPlugin<'ctx> {
 
             match storage.put_state(&sensor.key, SensorState::new(input, min, max)) {
                 Ok(_) => {}
-                Err(()) => error_group.push(SimpleError::new(format!(
+                Err(_) => error_group.push(SimpleError::new(format!(
                     "Could not find a sensor {} in storage, even though libsensors registered it.",
                     sensor.key.display()
                 ))),
