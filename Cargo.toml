@@ -17,6 +17,7 @@ typetag = "0.2"
 lazy_static="1.5.0"
 
 log = "0.4.28"
+tap = ">=1.0.1"
 systemd-journal-logger = "2.2.2"
 simple_logger = { version = "5.0.0", features = ["stderr"] }
 chrono = "0.4.42"
