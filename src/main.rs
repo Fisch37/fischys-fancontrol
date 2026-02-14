@@ -18,7 +18,7 @@ pub mod utils;
 
 pub const APP_ID: &str = "fischys-fancontrol";
 pub const POLL_ENV: &str = "POLL_RATE";
-pub const DEFAULT_POLL_RATE: u64 = 3;
+pub const DEFAULT_POLL_RATE: u64 = 1;
 
 lazy_static! {
     pub static ref CONFIG_PATH: &'static Path = Path::new("/etc/fischys-fancontrol");
