@@ -86,6 +86,7 @@ impl InterpolatedSensorControl {
             })
     }
 }
+#[typetag::serde(name = "interpolated")]
 impl PwmControl for InterpolatedSensorControl {
     fn evaluate(&self, state: &SensorStorage) -> Option<f64> {
         self.evaluate_meta(state).map(|data| data.value)

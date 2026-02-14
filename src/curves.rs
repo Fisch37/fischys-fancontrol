@@ -7,11 +7,12 @@ pub use self::{
     composite::MultiSensorControl,
     interpolated::{InterpolatedSensorControl, InterpolationMode, InterpolationData}
 };
+pub type SensorControl = Box<dyn PwmControl>;
 
 use std::{collections::HashMap, error::Error};
 
 use log::{info, log_enabled, warn};
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     controllers::FanController,
@@ -50,27 +51,14 @@ const fn f64_1() -> f64 {
     1.0
 }
 
+#[typetag::serde(tag = "type")]
 pub trait PwmControl: std::fmt::Debug {
     fn evaluate(&self, state: &SensorStorage) -> Option<f64>;
 }
-
-#[derive(Clone)]
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum SensorControl {
-    Single(SingleSensorControl),
-    Multi(MultiSensorControl),
-    // Interpolated(InterpolatedSensorControl),
-    Literal { value: f64 },
-}
-impl PwmControl for SensorControl {
-    fn evaluate(&self, state: &SensorStorage) -> Option<f64> {
-        match self {
-            Self::Single(x) => x.evaluate(state),
-            Self::Multi(x) => x.evaluate(state),
-            // Self::Interpolated(x) => x.evaluate(state),
-            Self::Literal { value } => Some(*value),
-        }
+#[typetag::serde(name = "literal")]
+impl PwmControl for f64 {
+    fn evaluate(&self, _: &SensorStorage) -> Option<f64>  {
+        Some(*self)
     }
 }
 

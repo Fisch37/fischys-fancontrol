@@ -3,12 +3,13 @@ use crate::groupie::SensorStorage;
 
 use super::{PwmControl, SensorControl, f64_avg, f64_median};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[derive(Serialize, Deserialize)]
 pub struct MultiSensorControl {
     pub sensors: Vec<SensorControl>,
     pub operation: SensorMergeOperation,
 }
+#[typetag::serde(name = "multi")]
 impl PwmControl for MultiSensorControl {
     fn evaluate(&self, state: &SensorStorage) -> Option<f64> {
         let chosen_sensors = self

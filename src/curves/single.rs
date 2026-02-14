@@ -31,6 +31,7 @@ impl PartialEq for SingleSensorControl {
     }
 }
 impl Eq for SingleSensorControl {}
+#[typetag::serde(name = "single")]
 impl PwmControl for SingleSensorControl {
     fn evaluate(&self, state: &SensorStorage) -> Option<f64> {
         state
