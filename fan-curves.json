@@ -1,39 +1,98 @@
 {
     "pwm1": {
         "input_sensors": {
-            "type": "single",
-            "adapter": "jc42-i2c-1-1a",
-            "sensor": "temp1"
+        	"type": "multi",
+        	"operation": "MAX",
+        	"sensors": [
+        		{
+        			"type": "single",
+		            "adapter": "k10temp-PCI-0b0@C3",
+                    "sensor": "Tctl"
+		        },
+        		{
+        			"type": "single",
+        		  	"adapter": "GPU-e9ec546e-7f75-d013-82cd-6b4f0c0e0c35",
+        		   	"sensor": "gpu_temperature"
+        		}
+        	]
         },
         "mode": "linear_interpolation",
         "points": [
-            [60, 77],
+        	[45, 0],
+            [80, 200],
             [90, 255]
-        ]
+        ],
+        "min": 0,
+        "max": 255
     },
     "pwm2": {
         "input_sensors": {
-            "type": "single",
-            "adapter": "k10temp-pci-00c3",
+        	"type": "single",
+            "adapter": "k10temp-PCI-0b0@C3",
             "sensor": "Tctl"
         },
         "mode": "linear_interpolation",
         "points": [
-            [0, 26],
-            [60, 26],
-            [90, 255]
-        ]
+            [30, 0],
+            [95, 255]
+        ],
+        "min": 0,
+        "max": 255
     },
     "pwm3": {
         "input_sensors": {
-            "type": "single",
-            "adapter": "jc42-i2c-1-1a",
-            "sensor": "temp1"
+        	"type": "multi",
+        	"operation": "MAX",
+        	"sensors": [
+        		{
+        			"type": "single",
+		            "adapter": "k10temp-PCI-0b0@C3",
+                    "sensor": "Tctl"
+		        },
+           		{
+           			"type": "single",
+           		  	"adapter": "GPU-e9ec546e-7f75-d013-82cd-6b4f0c0e0c35",
+           		   	"sensor": "gpu_temperature"
+           		}
+        	]
         },
         "mode": "linear_interpolation",
         "points": [
-            [50, 127],
+        	[45, 0],
+            [70, 127],
             [90, 255]
-        ]
+        ],
+        "min": 0,
+        "max": 255
+    },
+    "GPU-e9ec546e-7f75-d013-82cd-6b4f0c0e0c35/0": {
+    	"input_sensors": {
+    		"type": "single",
+            "adapter": "GPU-e9ec546e-7f75-d013-82cd-6b4f0c0e0c35",
+          	"sensor": "gpu_temperature"
+    	},
+    	"mode": "linear_interpolation",
+    	"points": [
+    		[65, 50],
+    		[75, 70],
+    		[90, 100]
+    	],
+    	"min": 0,
+    	"max": 100
+    },
+    "GPU-e9ec546e-7f75-d013-82cd-6b4f0c0e0c35/1": {
+    	"input_sensors": {
+    		"type": "single",
+            "adapter": "GPU-e9ec546e-7f75-d013-82cd-6b4f0c0e0c35",
+          	"sensor": "gpu_temperature"
+    	},
+    	"mode": "linear_interpolation",
+    	"points": [
+    		[65, 50],
+    		[75, 70],
+    		[90, 100]
+    	],
+    	"min": 0,
+    	"max": 100
     }
 }

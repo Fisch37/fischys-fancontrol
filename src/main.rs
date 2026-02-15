@@ -6,7 +6,7 @@ use lazy_static::lazy_static;
 use libsensors_rs::LibSensors;
 use log::warn;
 
-use crate::commands::characteristics::CharacteristicsArgs;
+use crate::commands::{characteristics::CharacteristicsArgs, list_sensors::ListSensorsArgs};
 
 mod commands;
 pub mod controllers;
@@ -22,7 +22,7 @@ pub const DEFAULT_POLL_RATE: u64 = 1;
 
 lazy_static! {
     pub static ref CONFIG_PATH: &'static Path = Path::new("/etc/fischys-fancontrol");
-    pub static ref CHARACTERISTICS_PATH: PathBuf = path_to_config("fan-characteristics.json");
+    pub static ref ASSOCIATIONS_PATH: PathBuf = path_to_config("fan-associations.json");
     pub static ref CURVES_PATH: PathBuf = path_to_config("fan-curves.json");
 }
 
@@ -79,14 +79,14 @@ impl GlobalContext {
 #[derive(clap::Parser)]
 pub enum CmdArgs {
     Service,
-    ListSensors,
+    ListSensors(ListSensorsArgs),
     Characteristics(CharacteristicsArgs),
 }
 
 fn main() {
     match CmdArgs::parse() {
         CmdArgs::Service => commands::service::start(),
-        CmdArgs::ListSensors => commands::list_sensors::start(),
+        CmdArgs::ListSensors(args) => commands::list_sensors::start(args),
         CmdArgs::Characteristics(args) => commands::characteristics::start(args),
     }
 }

@@ -44,12 +44,12 @@ pub fn discover_pwm_fans(
         .cloned()
         .collect();
 
-    println!(
+    eprintln!(
         "Found {} fans: {}",
         fans.len(),
         join_borrowed(fans.iter().map(SensorKey::get_sensor_name), ' ')
     );
-    println!(
+    eprintln!(
         "Found {} pwms: {}",
         controllers.len(),
         join_borrowed(controllers.iter().map(|p| p.get_key()), ' ')
@@ -60,24 +60,25 @@ pub fn discover_pwm_fans(
         p.write_value(p.get_max_value())?;
     }
     sleep(Duration::from_secs(5));
-    println!("Spun up fans");
+    eprintln!("Spun up fans");
     state.update()?;
     for fan in get_all_in(fans.iter(), &state) {
-        print!("{} {:.0} RPM ", fan.name, fan.input)
+        eprint!("{} {:.0} RPM ", fan.name, fan.input)
     }
-    println!();
+    eprintln!();
 
     let fan_speeds: Vec<f64> = get_all_in(fans.iter(), &state).map(|d| d.input).collect();
     let mut influence_list: Vec<Vec<usize>> = Vec::new();
     for p in &mut controllers {
-        println!("Testing {}", p.get_key());
+        eprintln!("Testing {}", p.get_key());
         p.write_value(p.get_min_value())?;
         sleep(Duration::from_secs(5));
         state.update()?;
         let mut affected_fans = vec![];
-        //                                                             FIXME: This is vulnerable to state changes.
-        //                                                              get_fan_states may return an it of different len, because of filter_map.
-        //                                                              (Real world scenario: A fan doesn't receive any updates for a long time, so the old data gets discarded)
+        // FIXME: This is vulnerable to state changes.
+        //  get_fan_states may return an it of different len, because of filter_map.
+        //  (Real world scenario: A fan doesn't receive any updates for a long time, so the old data gets discarded)
+        //   (This doesn't happen as of right now, but it is a possible change)
         for (i, (fan, original_speed)) in
             zip(get_all_in(fans.iter(), &state), &fan_speeds).enumerate()
         {
@@ -87,15 +88,11 @@ pub fn discover_pwm_fans(
             }
         }
 
-        let mut str = String::new();
+        eprint!("{} affects ", p.get_key());
         for i in &affected_fans {
-            let (adapter_key, sensor_name) = &fans[*i].get_sensor_key();
-            str += adapter_key;
-            str += "/";
-            str += sensor_name;
-            str += " ";
+            eprint!("{} ", fans[*i].display());
         }
-        println!("{} affects {}", p.get_key(), str);
+        eprintln!();
 
         influence_list.push(affected_fans);
         p.write_value(p.get_max_value())?;

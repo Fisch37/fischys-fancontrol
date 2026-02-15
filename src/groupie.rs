@@ -1,11 +1,11 @@
 use std::{
-    array, cmp::Ordering, error::Error, fmt::Display, hash::Hash, rc::Rc, time::Instant,
+    array, cmp::Ordering, error::Error, fmt::Display, hash::Hash, rc::Rc, time::Instant
 };
 
 use hashbrown::{Equivalent, HashMap};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
-use strum::{EnumCount, EnumIter, VariantArray};
+use strum::{EnumCount, EnumIter, EnumString, VariantArray};
 
 use crate::{GlobalContext, utils::ErrorGroup};
 
@@ -179,20 +179,11 @@ impl<'a> From<&'a (Sensor, SensorState)> for SensorData<'a> {
 }
 
 #[repr(u8)]
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Hash,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    EnumCount,
-    EnumIter,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Debug)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(EnumCount, EnumIter, EnumString)]
+#[strum(serialize_all = "kebab-case")]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SensorKind {
     Temperature,

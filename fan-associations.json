@@ -1,0 +1,59 @@
+[
+  {
+    "pwm": "pwm1",
+    "fans": [
+      [
+        "nct6798-ISA-0b0@290",
+        "fan1"
+      ]
+    ]
+  },
+  {
+    "pwm": "pwm2",
+    "fans": [
+      [
+        "nct6798-ISA-0b0@290",
+        "fan2"
+      ]
+    ]
+  },
+  {
+    "pwm": "pwm3",
+    "fans": [
+      [
+        "nct6798-ISA-0b0@290",
+        "fan3"
+      ]
+    ]
+  },
+  {
+    "pwm": "pwm4",
+    "fans": []
+  },
+  {
+    "pwm": "pwm5",
+    "fans": []
+  },
+  {
+    "pwm": "pwm6",
+    "fans": []
+  },
+  {
+    "pwm": "GPU-e9ec546e-7f75-d013-82cd-6b4f0c0e0c35/0",
+    "fans": [
+      [
+        "GPU-e9ec546e-7f75-d013-82cd-6b4f0c0e0c35",
+        "fan0"
+      ]
+    ]
+  },
+  {
+    "pwm": "GPU-e9ec546e-7f75-d013-82cd-6b4f0c0e0c35/1",
+    "fans": [
+      [
+        "GPU-e9ec546e-7f75-d013-82cd-6b4f0c0e0c35",
+        "fan1"
+      ]
+    ]
+  }
+]
