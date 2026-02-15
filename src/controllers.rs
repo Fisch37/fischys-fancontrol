@@ -1,7 +1,7 @@
+pub mod guards;
 #[cfg(feature = "nvml")]
 pub mod nvml;
 pub mod pwm;
-pub mod guards;
 
 use std::fmt::Display;
 

@@ -1,10 +1,9 @@
-use serde::{Deserialize, Serialize};
 use crate::groupie::SensorStorage;
+use serde::{Deserialize, Serialize};
 
 use super::{PwmControl, SensorControl, f64_avg, f64_median};
 
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MultiSensorControl {
     pub sensors: Vec<SensorControl>,
     pub operation: SensorMergeOperation,
@@ -22,8 +21,7 @@ impl PwmControl for MultiSensorControl {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum SensorMergeOperation {
     MIN,
     MAX,
@@ -31,7 +29,7 @@ pub enum SensorMergeOperation {
     MEDIAN,
     SUM,
     // I doubt anybody actually wants this
-    PRODUCT
+    PRODUCT,
 }
 impl SensorMergeOperation {
     pub fn reduce(self, values: impl IntoIterator<Item = f64>) -> Option<f64> {
@@ -42,7 +40,7 @@ impl SensorMergeOperation {
             Self::AVERAGE => Some(f64_avg(values)),
             Self::MEDIAN => f64_median(values),
             Self::SUM => Some(values.sum()),
-            Self::PRODUCT => Some(values.product())
+            Self::PRODUCT => Some(values.product()),
         }
     }
 }

@@ -199,20 +199,18 @@ fn start_inner(context: GlobalContext) -> Result<(), ServiceError> {
 
     let mut state = SensorStorage::new(&context);
     {
-        let mut controllers = AutoGuard::wrap(
-            loop {
-                match scan_all(&context) {
-                    Ok(p) => {
-                        break p;
-                    }
-                    Err(e) => error!(
-                        "Failed to find PWM devices. Retrying in 1 second. Error {}",
-                        e
-                    ),
+        let mut controllers = AutoGuard::wrap(loop {
+            match scan_all(&context) {
+                Ok(p) => {
+                    break p;
                 }
-                sleep(Duration::from_secs(1));
+                Err(e) => error!(
+                    "Failed to find PWM devices. Retrying in 1 second. Error {}",
+                    e
+                ),
             }
-        );
+            sleep(Duration::from_secs(1));
+        });
         disable_auto_for_controlled(&mut controllers, &fan_curves);
         while !must_exit.load(Ordering::Relaxed) {
             // To be honest I am quite unsure of the Ordering contraints I chose here.
@@ -234,9 +232,7 @@ fn start_inner(context: GlobalContext) -> Result<(), ServiceError> {
             if let Err(e) = state.update() {
                 warn!("Failed to query sensor state: {}", e)
             }
-            if let Err(errors) =
-                update_pwms(&state, &mut controllers, &fan_curves, &mut |_| {})
-            {
+            if let Err(errors) = update_pwms(&state, &mut controllers, &fan_curves, &mut |_| {}) {
                 // I would have preferred cleaner handling
                 let mut output = "[".to_owned();
                 for e in errors {

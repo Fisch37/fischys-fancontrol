@@ -1,6 +1,4 @@
-use std::{
-    array, cmp::Ordering, error::Error, fmt::Display, hash::Hash, rc::Rc, time::Instant
-};
+use std::{array, cmp::Ordering, error::Error, fmt::Display, hash::Hash, rc::Rc, time::Instant};
 
 use hashbrown::{Equivalent, HashMap};
 use lazy_static::lazy_static;
@@ -179,9 +177,9 @@ impl<'a> From<&'a (Sensor, SensorState)> for SensorData<'a> {
 }
 
 #[repr(u8)]
-#[derive(Debug)]
-#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
-#[derive(EnumCount, EnumIter, EnumString)]
+#[derive(
+    Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, EnumCount, EnumIter, EnumString,
+)]
 #[strum(serialize_all = "kebab-case")]
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

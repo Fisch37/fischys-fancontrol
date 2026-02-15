@@ -1,12 +1,10 @@
-use std::hash::Hash;
-use serde::{Deserialize, Serialize};
 use crate::groupie::{SensorKey, SensorStorage};
+use serde::{Deserialize, Serialize};
+use std::hash::Hash;
 
 use super::{PwmControl, f64_1};
 
-
-#[derive(Debug, Clone)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleSensorControl {
     pub adapter: String,
     pub sensor: String,

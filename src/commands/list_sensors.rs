@@ -1,7 +1,7 @@
 use std::{thread::sleep, time::Duration};
 
-use tap::prelude::*;
 use regex::Regex;
+use tap::prelude::*;
 
 use crate::{
     GlobalContext,
@@ -17,15 +17,19 @@ pub struct ListSensorsArgs {
     #[arg(short = 's', long)]
     sensor_key: Option<Regex>,
 
-    #[arg(short = 't', long="repeat")]
-    repeat_interval: Option<u64>
+    #[arg(short = 't', long = "repeat")]
+    repeat_interval: Option<u64>,
 }
 impl ListSensorsArgs {
     pub fn should_list(&self, sensor: &Sensor) -> bool {
         self.kind.is_none_or(|kind| sensor.kind == kind)
-            && self.adapter_key.as_ref()
+            && self
+                .adapter_key
+                .as_ref()
                 .is_none_or(|regex| regex.is_match(&sensor.name))
-            && self.sensor_key.as_ref()
+            && self
+                .sensor_key
+                .as_ref()
                 .is_none_or(|regex| regex.is_match(&sensor.adapter.key))
     }
 }
@@ -38,17 +42,16 @@ pub fn start(args: ListSensorsArgs) {
         .unwrap();
     let context = GlobalContext::init().unwrap();
     let mut state = SensorStorage::new(&context);
-    
+
     loop {
         state.update().unwrap();
-        let state = state.iter()
+        let state = state
+            .iter()
             .collect::<Vec<_>>()
             .tap_mut(|state| state.sort_by(|(a, _), (b, _)| a.cmp_by_sensor_key(b)));
 
         let mut last_adapter: Option<&Adapter> = None;
-        for (sensor, state) in state.iter()
-            .filter(|(sensor, _)| args.should_list(sensor))
-        {
+        for (sensor, state) in state.iter().filter(|(sensor, _)| args.should_list(sensor)) {
             if last_adapter.is_none_or(|last_adapter| *last_adapter != *sensor.adapter) {
                 println!("\n{}:", sensor.adapter.name);
 

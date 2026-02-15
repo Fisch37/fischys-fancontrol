@@ -3,9 +3,9 @@ mod interpolated;
 mod single;
 
 pub use self::{
-    single::SingleSensorControl,
     composite::MultiSensorControl,
-    interpolated::{InterpolatedSensorControl, InterpolationMode, InterpolationData}
+    interpolated::{InterpolatedSensorControl, InterpolationData, InterpolationMode},
+    single::SingleSensorControl,
 };
 pub type SensorControl = Box<dyn PwmControl>;
 
@@ -14,11 +14,7 @@ use std::{collections::HashMap, error::Error};
 use log::{info, log_enabled, warn};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    controllers::FanController,
-    groupie::SensorStorage,
-    utils::SimpleError
-};
+use crate::{controllers::FanController, groupie::SensorStorage, utils::SimpleError};
 
 fn f64_avg<I: IntoIterator<Item = f64>>(iterator: I) -> f64 {
     let mut sum: f64 = 0.0;
@@ -57,7 +53,7 @@ pub trait PwmControl: std::fmt::Debug {
 }
 #[typetag::serde(name = "literal")]
 impl PwmControl for f64 {
-    fn evaluate(&self, _: &SensorStorage) -> Option<f64>  {
+    fn evaluate(&self, _: &SensorStorage) -> Option<f64> {
         Some(*self)
     }
 }
@@ -65,7 +61,7 @@ impl PwmControl for f64 {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PwmCurve {
     #[serde(flatten)]
-    interpolate_control: InterpolatedSensorControl
+    interpolate_control: InterpolatedSensorControl,
 }
 
 pub fn update_pwms<'a, C: AsMut<dyn FanController + 'a>>(
@@ -89,13 +85,16 @@ pub fn update_pwms<'a, C: AsMut<dyn FanController + 'a>>(
             input_value,
             value: target_pwm,
             low_index,
-            high_index
+            high_index,
         } = match curve.interpolate_control.evaluate_meta(state) {
             Some(x) => x,
             None => {
-                push_err(&mut errors, SimpleError::from(format!(
-                    "Error evaluating control for {pwm_name}. See the log for details.",
-                )));
+                push_err(
+                    &mut errors,
+                    SimpleError::from(format!(
+                        "Error evaluating control for {pwm_name}. See the log for details.",
+                    )),
+                );
                 continue;
             }
         };

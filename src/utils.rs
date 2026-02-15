@@ -1,6 +1,6 @@
 use std::{
     error::Error,
-    fmt::{Debug, Display}
+    fmt::{Debug, Display},
 };
 
 use log::{debug, error};
@@ -185,15 +185,12 @@ impl<'e, I: Iterator<Item = Result<T, E>>, T, E: Error + 'static> Iterator
 }
 
 const MAX_AUTO_RETRIES_ON_EXIT: u8 = 5;
-pub fn return_to_auto<C, R>(
-    controllers: &mut [R]
-) -> usize
-    where C: FanController + ?Sized,
-        R: AsMut<C>
+pub fn return_to_auto<C, R>(controllers: &mut [R]) -> usize
+where
+    C: FanController + ?Sized,
+    R: AsMut<C>,
 {
-    let mut pwms_to_automate: Vec<&mut C> = controllers.iter_mut()
-        .map(AsMut::as_mut)
-        .collect();
+    let mut pwms_to_automate: Vec<&mut C> = controllers.iter_mut().map(AsMut::as_mut).collect();
     let mut retries: u8 = MAX_AUTO_RETRIES_ON_EXIT;
     while !pwms_to_automate.is_empty() && retries > 0 {
         let mut pwms_buffer = Vec::new(); // Expected state has 0 failures. Avoids allocation
