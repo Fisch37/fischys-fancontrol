@@ -28,8 +28,8 @@ where T: FanController + ?Sized,
     pub fn wrap(controllers: C) -> Self {
         AutoGuard {
             controllers,
-            _phantom: PhantomData::default(),
-            _phantom2: PhantomData::default()
+            _phantom: PhantomData,
+            _phantom2: PhantomData
         }
     }
 

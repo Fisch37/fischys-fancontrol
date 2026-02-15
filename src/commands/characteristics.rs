@@ -62,7 +62,6 @@ pub fn start(args: CharacteristicsArgs) {
                     controllers.sort_by(|a, b| a.get_key().cmp(b.get_key()));
                     if controllers.is_empty() {
                         eprintln!("No controllers match the specified keys!");
-                        return;
                     } else {
                         eprint!("Testing ");
                         for c in controllers {

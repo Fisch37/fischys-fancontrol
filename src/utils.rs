@@ -185,7 +185,7 @@ impl<'e, I: Iterator<Item = Result<T, E>>, T, E: Error + 'static> Iterator
 }
 
 const MAX_AUTO_RETRIES_ON_EXIT: u8 = 5;
-pub fn return_to_auto<'a, C, R>(
+pub fn return_to_auto<C, R>(
     controllers: &mut [R]
 ) -> usize
     where C: FanController + ?Sized,
