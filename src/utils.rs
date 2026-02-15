@@ -186,8 +186,15 @@ impl<'e, I: Iterator<Item = Result<T, E>>, T, E: Error + 'static> Iterator
 }
 
 const MAX_AUTO_RETRIES_ON_EXIT: u8 = 5;
-pub fn return_to_auto<'a>(controllers: &mut [Box<dyn FanController + 'a>]) -> usize {
-    let mut pwms_to_automate: Vec<&mut Box<_>> = controllers.iter_mut().collect();
+pub fn return_to_auto<'a, C, R>(
+    controllers: &mut [R]
+) -> usize
+    where C: FanController + ?Sized,
+        R: AsMut<C>
+{
+    let mut pwms_to_automate: Vec<&mut C> = controllers.iter_mut()
+        .map(AsMut::as_mut)
+        .collect();
     let mut retries: u8 = MAX_AUTO_RETRIES_ON_EXIT;
     while !pwms_to_automate.is_empty() && retries > 0 {
         let mut pwms_buffer = Vec::new(); // Expected state has 0 failures. Avoids allocation
@@ -216,6 +223,7 @@ pub fn return_to_auto<'a>(controllers: &mut [Box<dyn FanController + 'a>]) -> us
 /// there is no guarantee that all controllers successfully enter automatic mode.
 ///
 /// This struct also implements [`Deref`] and [`DerefMut`] so that access to the contained values is still possible.
+#[deprecated(note = "Use crate::controllers::guards::AutoGuard instead")]
 pub struct ReturnToAutoWrapper<'a, 'b> {
     controllers: &'b mut [Box<dyn FanController + 'a>],
 }
