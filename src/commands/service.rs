@@ -22,10 +22,10 @@ use systemd_journal_logger::{JournalLog, connected_to_journal};
 
 use crate::{
     CONFIG_PATH, CURVES_PATH, DEFAULT_POLL_RATE, GlobalContext, POLL_ENV,
-    controllers::{FanController, scan_all},
+    controllers::{FanController, guards::AutoGuard, scan_all},
     curves::{PwmCurve, update_pwms},
     groupie::SensorStorage,
-    utils::{ReturnToAutoWrapper, return_to_auto},
+    utils::return_to_auto,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -198,23 +198,22 @@ fn start_inner(context: GlobalContext) -> Result<(), ServiceError> {
     let mut fan_curves: HashMap<String, PwmCurve> = reload_config()?;
 
     let mut state = SensorStorage::new(&context);
-    let mut controllers;
-    loop {
-        match scan_all(&context) {
-            Ok(p) => {
-                controllers = p;
-                break;
-            }
-            Err(e) => error!(
-                "Failed to find PWM devices. Retrying in 1 second. Error {}",
-                e
-            ),
-        }
-        sleep(Duration::from_secs(1));
-    }
     {
-        let mut controllers_wrapped = ReturnToAutoWrapper::new(&mut controllers);
-        disable_auto_for_controlled(&mut controllers_wrapped, &fan_curves);
+        let mut controllers = AutoGuard::wrap(
+            loop {
+                match scan_all(&context) {
+                    Ok(p) => {
+                        break p;
+                    }
+                    Err(e) => error!(
+                        "Failed to find PWM devices. Retrying in 1 second. Error {}",
+                        e
+                    ),
+                }
+                sleep(Duration::from_secs(1));
+            }
+        );
+        disable_auto_for_controlled(&mut controllers, &fan_curves);
         while !must_exit.load(Ordering::Relaxed) {
             // To be honest I am quite unsure of the Ordering contraints I chose here.
             // My rational is as follows: On a failure (no reload was requested), a signal handler may set the flag.
@@ -229,14 +228,14 @@ fn start_inner(context: GlobalContext) -> Result<(), ServiceError> {
             {
                 fan_curves = reload_config()?;
                 // TODO: Add some system to determine which fans need to be dropped...
-                return_to_auto(&mut controllers_wrapped);
-                disable_auto_for_controlled(&mut controllers_wrapped, &fan_curves);
+                return_to_auto(&mut controllers);
+                disable_auto_for_controlled(&mut controllers, &fan_curves);
             }
             if let Err(e) = state.update() {
                 warn!("Failed to query sensor state: {}", e)
             }
             if let Err(errors) =
-                update_pwms(&state, &mut controllers_wrapped, &fan_curves, &mut |_| {})
+                update_pwms(&state, &mut controllers, &fan_curves, &mut |_| {})
             {
                 // I would have preferred cleaner handling
                 let mut output = "[".to_owned();
