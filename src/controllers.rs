@@ -103,19 +103,32 @@ pub fn scan_all(context: &GlobalContext) -> Result<Vec<Box<dyn FanController>>> 
 }
 
 #[cfg(feature = "nvml")]
+/// Scan all available fan controllers and returns the combined results,
+/// or an error if any of the scans failed.
 pub fn scan_all<'a>(context: &'a GlobalContext) -> Result<Vec<Box<dyn FanController + 'a>>> {
     use nvml::NVIDIAFanController;
 
     let pwms = Pwm::scan()?;
     let nvidia_fans: Vec<NVIDIAFanController> = NVIDIAFanController::scan(context.get_nvml())?;
-    Ok(pwms
-        .into_iter()
-        .map(Box::new)
-        .map(trait_coerce)
-        .chain(nvidia_fans.into_iter().map(Box::new).map(trait_coerce))
-        .collect())
+    Ok(
+        boxme(pwms)
+        .chain(boxme(nvidia_fans))
+        .collect()
+    )
 }
 
+#[inline]
+fn boxme<'a, T, I>(iterable: I) -> impl Iterator<Item = Box<dyn FanController + 'a>>
+where
+    T: FanController + 'a,
+    I: IntoIterator<Item = T>
+{
+    iterable.into_iter()
+        .map(Box::new)
+        .map(trait_coerce)
+}
+
+#[inline]
 fn trait_coerce<'b, T: FanController + 'b>(b: Box<T>) -> Box<dyn FanController + 'b> {
     b
 }
