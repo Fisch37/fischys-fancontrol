@@ -30,6 +30,7 @@ where
     R: AsMut<T>,
     C: AsMut<[R]>,
 {
+    /// Guard a collection of [`FanController`]s.
     pub fn wrap(controllers: C) -> Self {
         AutoGuard {
             controllers,
@@ -80,6 +81,16 @@ where
         &self.controllers
     }
 }
+impl<'a, T, R, C> AsRef<[R]> for AutoGuard<'a, T, R, C>
+where
+    T: FanController + ?Sized,
+    R: AsMut<T>,
+    C: AsMut<[R]> + AsRef<[R]>,
+{
+    fn as_ref(&self) -> &[R] {
+        self.controllers.as_ref()
+    }
+}
 impl<'a, T, R, C> AsMut<C> for AutoGuard<'a, T, R, C>
 where
     T: FanController + ?Sized,
@@ -88,6 +99,16 @@ where
 {
     fn as_mut(&mut self) -> &mut C {
         &mut self.controllers
+    }
+}
+impl<'a, T, R, C> AsMut<[R]> for AutoGuard<'a, T, R, C>
+where
+    T: FanController + ?Sized,
+    R: AsMut<T>,
+    C: AsMut<[R]>,
+{
+    fn as_mut(&mut self) -> &mut [R] {
+        self.controllers.as_mut()
     }
 }
 impl<'a, T, R, C> Deref for AutoGuard<'a, T, R, C>

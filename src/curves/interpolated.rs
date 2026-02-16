@@ -4,21 +4,35 @@ use log::error;
 use serde::{Deserialize, Serialize};
 use tap::prelude::*;
 
-const fn default_curve_mode() -> InterpolationMode {
+#[doc(hidden)]
+const fn default_interpolation_mode() -> InterpolationMode {
     InterpolationMode::LinearInterpolation
 }
 
+/// Metadata about the interpolation process.
 pub struct InterpolationData {
     pub input_value: f64,
+    /// The resulting PWM-value
     pub value: f64,
+    /// The index of the highest value less than input_value
+    /// (or None if input_value is less than the first point.0)
     pub low_index: Option<usize>,
+    /// The index of lowest value greater than input_value
+    /// (or None if input_value is greater than the last point.0)
     pub high_index: Option<usize>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+/// Interpolates between points on a spline using the contained sensor as the x-value.
+/// See [`InterpolationMode`] for different options for interpolating.
+///
+/// Also requires a `min` and `max` value for when the sensor value goes outside the bounds
+/// of the curve.
+///
+/// **Note:** `points` is assumed to be sorted. Weirdness will happen if it is not.
 pub struct InterpolatedSensorControl {
     input: SensorControl,
-    #[serde(default = "default_curve_mode")]
+    #[serde(default = "default_interpolation_mode")]
     mode: InterpolationMode,
     min: f64,
     max: f64,
@@ -99,9 +113,14 @@ impl PwmControl for InterpolatedSensorControl {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+/// How to interpolate between values.
 pub enum InterpolationMode {
+    /// Interpolate linearly along subsequent pairs of points.
+    /// This is the type of interpolation you will typically see in control programs.
     LinearInterpolation,
+    /// Snap to the highest value lower than the sensor input.
     SnapLow,
+    /// Snap to the lowest value higher than the sensor input.
     SnapHigh,
 }
 impl InterpolationMode {

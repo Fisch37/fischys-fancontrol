@@ -21,12 +21,14 @@ lazy_static! {
     static ref PWM_PATTERN: Regex = Regex::new(r"^pwm[1-9][0-9]*$").unwrap();
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// A file I/O-based [`FanController`].
 pub struct Pwm {
     base_path: PathBuf,
 }
 
 impl Pwm {
+    /// Scan the file system for PWMs.
     pub fn scan() -> Result<Vec<Pwm>, IOError> {
         // TODO: Make this code not suck
         // TODO: Make use of iterators to save on allocating a vec for this in in controllers::scan_all
@@ -88,19 +90,27 @@ impl Pwm {
     }
 
     fn get_name_raw(&self) -> &OsStr {
-        self.base_path.file_name().unwrap()
+        self.base_path.file_name()
+            .expect("Pwm does not have a file name? Must have, because is not root")
     }
 
+    /// Appends a special extension (such as "enabled") to the base path
     fn special_file(&self, extension: &str) -> PathBuf {
-        let mut filename = self.base_path.file_name().unwrap().to_os_string();
-        filename.push("_");
-        filename.push(extension);
-        self.base_path.parent().unwrap().join(filename)
+        let mut special_path = self.base_path.clone();
+        {
+            let as_os_string = special_path.as_mut_os_string();
+            as_os_string.push("_");
+            as_os_string.push(extension);
+        }
+        special_path
     }
 }
 impl FanController for Pwm {
     fn get_key(&self) -> &str {
-        self.get_name_raw().to_str().unwrap()
+        self.get_name_raw().to_str()
+            // it would be quite incredible if our discovery process failed so much at its job,
+            // that we're getting garbage paths as a result.
+            .expect("Pwm name is not UTF-8 encoded")
     }
 
     fn read_value(&self) -> Result<f64, FanControlError> {

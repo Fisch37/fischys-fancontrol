@@ -14,7 +14,6 @@ use strum::{EnumCount, EnumIter, EnumString, VariantArray};
 
 use crate::{GlobalContext, utils::ErrorGroup};
 
-#[cfg(feature = "libsensors")]
 mod libsensors;
 #[cfg(feature = "sensors-cmd")]
 mod lm_sensors;
@@ -114,12 +113,12 @@ impl From<(String, String)> for OwnedKey {
     }
 }
 impl<'a, 'b, A, B> From<(&'a A, &'b B)> for OwnedKey
-where 
+where
     A: AsRef<str> + ?Sized,
-    B: AsRef<str> + ?Sized
+    B: AsRef<str> + ?Sized,
 {
     fn from(value: (&'a A, &'b B)) -> Self {
-        (value.0.to_owned(), value.1.to_owned()).into()
+        From::<(String, String)>::from((value.0.as_ref().to_owned(), value.1.as_ref().to_owned()))
     }
 }
 impl SensorKey for OwnedKey {
@@ -231,11 +230,11 @@ impl<'a> From<&'a (Sensor, SensorState)> for SensorData<'a> {
 #[serde(rename_all = "lowercase")]
 /// The kind of value a sensor is storing.
 /// This also corresponds to a particular unit.
-/// 
+///
 /// Units are kept in their "everyday" format,
 /// but scaled down to their base unit where applicable.
 /// (e.g. [`Self::Fan`] uses RPM, but [`Self::Power`] uses watts, not milliwatts)
-/// 
+///
 /// It is highly recommendable for plugin developers to look at the specified units
 /// and scale the values received by their datasource accordingly.
 pub enum SensorKind {
@@ -258,7 +257,7 @@ impl SensorKind {
             Self::Voltmeter => "V",
             Self::Current => "A",
             // Energy is open to discussion and may be better used given in "kWh"
-            Self::Energy => "J"
+            Self::Energy => "J",
         }
     }
 }
@@ -332,7 +331,7 @@ trait SensorPlugin {
 
 /// The central data holder of Groupie.
 /// Stores all sensor data as well as all [`SensorPlugin`] instances.
-/// 
+///
 /// Groupie does not guarantee that only one instance of this struct will exist at a time
 /// and plugins should especially be able to handle being reinstantiated over the plugin lifetime.
 pub struct SensorStorage<'ctx> {
@@ -376,7 +375,7 @@ impl<'ctx> SensorStorage<'ctx> {
     }
 
     /// Get the metadata and state data for a sensor combined.
-    /// 
+    ///
     /// Returns [`None`] if the sensor does not exist _or_ it does not have any data.
     pub fn get_sensor_data<T: SensorKey>(&self, key: T) -> Option<SensorData<'_>> {
         let key = key.get_sensor_key();
@@ -433,7 +432,7 @@ impl<'ctx> SensorStorage<'ctx> {
 
 /// A wrapper struct that removes some of the functionalities of the internal HashMap.
 /// Used to ensure plugins cannot mess up the invariants required for internal datastructure integrity.
-/// 
+///
 /// Most importantly, there is no simple `insert` function, due to the integrity constraint in [`SensorStorage`].
 pub struct PluginStorage {
     inner: HashMap<OwnedKey, (Sensor, Option<SensorState>)>,
@@ -490,7 +489,7 @@ impl PluginStorage {
     }
 
     /// Inserts a [`SensorState`] for a sensor, referred to by `key`.
-    /// 
+    ///
     /// Returns an [`Err`] variant containing the passed state, if no sensor for that key exists.
     pub fn put_state<K: SensorKey>(
         &mut self,

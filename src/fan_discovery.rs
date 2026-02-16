@@ -1,3 +1,5 @@
+//! Find pwm: fan associations
+
 use std::{iter::zip, thread::sleep, time::Duration};
 
 use serde::{Deserialize, Serialize};

@@ -15,6 +15,7 @@ pub mod fan_configuration;
 pub mod fan_discovery;
 pub mod groupie;
 pub mod utils;
+pub mod nvml_extensions;
 
 pub const APP_ID: &str = "fischys-fancontrol";
 pub const POLL_ENV: &str = "POLL_RATE";
@@ -66,11 +67,13 @@ impl GlobalContext {
     }
 
     #[cfg(feature = "nvml")]
+    /// Get a handle to the NVML API
     pub fn get_nvml(&self) -> &nvml_wrapper::Nvml {
         &self.nvml
     }
 
     #[cfg(feature = "libsensors")]
+    /// Get a handle to lm-sensors' libsensors API
     pub fn get_libsensors(&self) -> &LibSensors {
         &self.libsensors
     }

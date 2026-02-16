@@ -1,3 +1,7 @@
+#[cfg(feature = "nvml")]
+pub use nvml::NVIDIAFanController;
+pub use pwm::Pwm;
+
 pub mod guards;
 #[cfg(feature = "nvml")]
 pub mod nvml;
@@ -5,12 +9,12 @@ pub mod pwm;
 
 use std::fmt::Display;
 
-pub use pwm::Pwm;
-
 use crate::GlobalContext;
 
 pub type Result<T> = std::result::Result<T, FanControlError>;
 
+/// A trait for controlling fans
+/// (or really any "thing" with scalar-value controls)
 pub trait FanController {
     /// Get the identifying key of this fan controller.
     /// This result must be unique to each logical controller on the system.
@@ -37,10 +41,17 @@ pub trait FanController {
     }
 
     /// Whether the program currently controls this fan controller.
+    ///
+    /// Note for developers:
+    /// If your controller does not have an automatic mode,
+    /// this method should always return `Ok(false)`.
     fn is_auto(&self) -> Result<bool>;
     /// Set whether the program currently controls this fan controller.
-    /// A value of false usually means that the controller will run automatically,
-    /// however it may be possible for some fan controllers to run in parallel.
+    /// A value of `false` means that this process makes no claims to control this fan.
+    ///
+    /// Note for developers:
+    /// If this controller does not have an automatic mode,
+    /// this method should return [`Err`] variant with [`FanControlError::InvalidData`].
     fn set_auto(&mut self, auto: bool) -> Result<()>;
 }
 
@@ -110,24 +121,20 @@ pub fn scan_all<'a>(context: &'a GlobalContext) -> Result<Vec<Box<dyn FanControl
 
     let pwms = Pwm::scan()?;
     let nvidia_fans: Vec<NVIDIAFanController> = NVIDIAFanController::scan(context.get_nvml())?;
-    Ok(
-        boxme(pwms)
-        .chain(boxme(nvidia_fans))
-        .collect()
-    )
+    Ok(boxme(pwms).chain(boxme(nvidia_fans)).collect())
 }
 
+#[doc(hidden)]
 #[inline]
 fn boxme<'a, T, I>(iterable: I) -> impl Iterator<Item = Box<dyn FanController + 'a>>
 where
     T: FanController + 'a,
-    I: IntoIterator<Item = T>
+    I: IntoIterator<Item = T>,
 {
-    iterable.into_iter()
-        .map(Box::new)
-        .map(trait_coerce)
+    iterable.into_iter().map(Box::new).map(trait_coerce)
 }
 
+#[doc(hidden)]
 #[inline]
 fn trait_coerce<'b, T: FanController + 'b>(b: Box<T>) -> Box<dyn FanController + 'b> {
     b

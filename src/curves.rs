@@ -1,3 +1,9 @@
+//! This module is the core of the entire project.
+//! It features the [`PwmControl`] trait and all of its implementors,
+//! which produce a target value for a [`FanController`], given the current [`SensorStorage`].
+//!
+//! For more detail, see the object descriptions.
+
 mod composite;
 mod interpolated;
 mod single;
@@ -9,14 +15,21 @@ pub use self::{
 };
 pub type SensorControl = Box<dyn PwmControl>;
 
-use std::{collections::HashMap, error::Error};
+use std::collections::HashMap;
 
 use log::{info, log_enabled, warn};
 use serde::{Deserialize, Serialize};
 
-use crate::{controllers::FanController, groupie::SensorStorage, utils::SimpleError};
+use crate::{
+    controllers::FanController,
+    groupie::SensorStorage,
+    utils::{ErrorGroup, SimpleError},
+};
 
-fn f64_avg<I: IntoIterator<Item = f64>>(iterator: I) -> f64 {
+#[doc(hidden)]
+/// Returns the average of a set of floats,
+/// or NaN if the iterator is empty.
+fn f64_avg<I: IntoIterator<Item = f64>>(iterator: I) -> Option<f64> {
     let mut sum: f64 = 0.0;
     let mut count: i64 = 0;
     for v in iterator {
@@ -26,9 +39,11 @@ fn f64_avg<I: IntoIterator<Item = f64>>(iterator: I) -> f64 {
     // count is not an f64 initially as that may cause it to get stuck during incrementation
     // due to float imprecision in large numbers.
     // Rounding to the next float at the end ensures an accurate(ish) value
-    sum / (count as f64)
+    // (many months later) wait, why am I worrying about precision errors that occur only at 9007199254740992?
+    Some(sum / (count as f64)).filter(|x| x.is_nan())
 }
 
+#[doc(hidden)]
 fn f64_median<I: IntoIterator<Item = f64>>(iterator: I) -> Option<f64> {
     let mut values: Vec<f64> = iterator.into_iter().collect();
     if values.is_empty() {
@@ -43,15 +58,25 @@ fn f64_median<I: IntoIterator<Item = f64>>(iterator: I) -> Option<f64> {
     })
 }
 
+#[doc(hidden)]
 const fn f64_1() -> f64 {
     1.0
 }
 
 #[typetag::serde(tag = "type")]
+/// This is a simple trait for types that hold information to calculate a PWM value
+/// from a set of sensor inputs.
 pub trait PwmControl: std::fmt::Debug {
+    /// Determine the target PWM value from a [`SensorStorage`].
+    ///
+    /// Returns [`None`] if the current state does not allow for a value to be determined,
+    /// else [`Some`] holding any valid floating point value.
+    /// Callers should not make any assumption as to the bounds or realness of this value
+    /// and should be prepared to handle special values (such as -inf, inf, NaN) correctly.
     fn evaluate(&self, state: &SensorStorage) -> Option<f64>;
 }
 #[typetag::serde(name = "literal")]
+/// A pwm literal value
 impl PwmControl for f64 {
     fn evaluate(&self, _: &SensorStorage) -> Option<f64> {
         Some(*self)
@@ -59,21 +84,29 @@ impl PwmControl for f64 {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+/// The root for a particular PWM curve configuration.
+///
+/// Now only a wrapper around [`InterpolatedSensorControl`].
+/// See that for details.
 pub struct PwmCurve {
     #[serde(flatten)]
     interpolate_control: InterpolatedSensorControl,
 }
 
+/// Adjusts a given set of [`FanController`]s by a [`PwmCurve`],
+/// if a curve for that controller is defined, calling `for_each_update`
+/// for every controller that was updated with `(pwm_key, sensor_value, pwm_value)`.
+///
+/// Handles errors permissively, always running to the end and collecting any errors
+/// that might occur, before returning an [`Err`] if any errors did occur.
 pub fn update_pwms<'a, C: AsMut<dyn FanController + 'a>>(
     state: &SensorStorage,
     pwms: &mut [C],
     curves: &HashMap<String, PwmCurve>,
     for_each_update: &mut impl FnMut((&str, f64, f64)),
-) -> Result<(), Vec<Box<dyn Error>>> {
-    let mut errors = vec![]; // don't want to set a capacity here. normally empty
-    fn push_err<E: Error + 'static>(errors: &mut Vec<Box<dyn Error>>, e: E) {
-        errors.push(Box::new(e));
-    }
+) -> Result<(), ErrorGroup> {
+    // don't want to set a capacity here. normally empty
+    let mut errors = ErrorGroup::new();
 
     for pwm in pwms.iter_mut().map(AsMut::as_mut) {
         let pwm_name = pwm.get_key();
@@ -83,21 +116,21 @@ pub fn update_pwms<'a, C: AsMut<dyn FanController + 'a>>(
         };
         let InterpolationData {
             input_value,
-            value: target_pwm,
+            value: mut target_pwm,
             low_index,
             high_index,
         } = match curve.interpolate_control.evaluate_meta(state) {
             Some(x) => x,
             None => {
-                push_err(
-                    &mut errors,
-                    SimpleError::from(format!(
-                        "Error evaluating control for {pwm_name}. See the log for details.",
-                    )),
-                );
+                errors.push(SimpleError::from(format!(
+                    "Error evaluating control for {pwm_name}. See the log for details.",
+                )));
                 continue;
             }
         };
+        let (pwm_min, pwm_max) = pwm.get_min_max_value();
+        // Receiving NaN is acceptable, as FanController::write_value will simply error
+        target_pwm = f64::clamp(target_pwm, pwm_min, pwm_max);
         for_each_update((pwm_name, input_value, target_pwm));
         if log_enabled!(log::Level::Info) {
             info!(
@@ -106,13 +139,9 @@ pub fn update_pwms<'a, C: AsMut<dyn FanController + 'a>>(
         }
         if let Err(e) = pwm.write_value(target_pwm) {
             warn!("Failed to set pwm for {}: {}", pwm.get_key(), e);
-            push_err(&mut errors, e);
+            errors.push(e);
         }
     }
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
+    errors.ok()
 }

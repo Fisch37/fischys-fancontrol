@@ -7,7 +7,7 @@ use std::rc::Rc;
 use log::warn;
 use nvml_wrapper::{Device, Nvml};
 
-use crate::controllers::nvml::NvmlExtensions;
+use crate::nvml_extensions::NvmlExtensions as _;
 use nvml_wrapper::{enum_wrappers::device::TemperatureSensor, error::NvmlError};
 
 use crate::eg_push_and_continue;

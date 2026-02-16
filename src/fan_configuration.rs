@@ -35,7 +35,7 @@ const FAN_SPEEDUP_DELAY: Duration = Duration::from_secs(5);
 const FAN_STEP_DELAY: Duration = Duration::from_secs(2);
 const FAN_SLOWDOWN_DELAY: Duration = Duration::from_secs(10);
 
-/// Determines the RPM curve of a fan depending on another PWM state.
+/// Determines the RPM curve of a fan depending on a certain PWM.
 /// This function assumes that the sensor pwm combo passed actually matches each other.
 /// If this is not the case, the output will be nonsensical.
 pub fn detect_fan_properties<K: SensorKey>(
@@ -115,12 +115,12 @@ fn find_start_values<Key: SensorKey>(
     let pwm_max = pwm.get_max_value();
     pwm.write_value(pwm.get_min_value())?;
     sleep(FAN_SLOWDOWN_DELAY - FAN_STEP_DELAY);
-    // using u8::MAX here is fine, because the loop below breaks before u8::MAX is called
+    // using pwm_max here is fine, because the loop below breaks before pwm_max is called
     let mut start_values = vec![pwm_max; rpm_sensors.len()];
     let mut value = pwm.get_min_value();
-    // not checking u8::MAX here is fine since it would be the last value and is used as the placeholder above.
-    // therefore, anything that would activate at u8::MAX, will have u8::MAX even though we never actually checked against it.
-    // NOTE: there is a flaw here, in that if a fan were to never activate, it would also get u8::MAX, therefore that value is inherently unreliable.
+    // not checking pwm_max here is fine since it would be the last value and is used as the placeholder above.
+    // therefore, anything that would activate at pwm_max, will have pwm_max even though we never actually checked against it.
+    // NOTE: there is a flaw here, in that if a fan were to never activate, it would also get pwm_max, therefore that value is inherently unreliable.
     //  This is an acceptable tradeoff to me. If a fan hasn't started yet on 240, I doubt it will start on 255. (Most fans won't reach this value anyway)
     while start_values.contains(&pwm_max) && value < pwm_max {
         pwm.write_value(value)?;

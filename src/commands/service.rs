@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     env,
     error::Error as StdError,
-    fmt::{Display, Write as _},
+    fmt::Display,
     fs,
     io::ErrorKind as IOErrorKind,
     ops::Deref as _,
@@ -233,15 +233,7 @@ fn start_inner(context: GlobalContext) -> Result<(), ServiceError> {
                 warn!("Failed to query sensor state: {}", e)
             }
             if let Err(errors) = update_pwms(&state, &mut controllers, &fan_curves, &mut |_| {}) {
-                // I would have preferred cleaner handling
-                let mut output = "[".to_owned();
-                for e in errors {
-                    if write!(&mut output, "{},", e).is_err() {
-                        output += &e.to_string() // Good enough (I don't think this is ever called)
-                    }
-                }
-                output.push(']');
-                error!("One or more fan adjustments failed: {}", output)
+                error!("One or more fan adjustments failed: {errors}")
             }
             sleep(Duration::from_secs(poll_frequency));
         }

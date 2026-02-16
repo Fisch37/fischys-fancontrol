@@ -1,10 +1,13 @@
 use crate::groupie::{SensorKey, SensorStorage};
 use serde::{Deserialize, Serialize};
-use std::hash::Hash;
+use std::{cmp::Ordering, hash::Hash};
 
 use super::{PwmControl, f64_1};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Derives a pwm value directly from a sensor, applying a conversion factor, if set.
+/// This type is usually used within a [`super::MultiSensorControl`]
+/// where multiple sensors can then be combined.
 pub struct SingleSensorControl {
     pub adapter: String,
     pub sensor: String,
@@ -18,14 +21,12 @@ impl SensorKey for SingleSensorControl {
 }
 impl Hash for SingleSensorControl {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.adapter.hash(state);
-        self.sensor.hash(state);
+        self.get_sensor_key().hash(state)
     }
 }
 impl PartialEq for SingleSensorControl {
     fn eq(&self, other: &Self) -> bool {
-        // Not a perfect .eq method, but it works... enough
-        self.adapter == other.adapter && self.sensor == other.sensor
+        self.cmp_by_sensor_key(other) == Ordering::Equal
     }
 }
 impl Eq for SingleSensorControl {}
