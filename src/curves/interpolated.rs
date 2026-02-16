@@ -31,6 +31,7 @@ pub struct InterpolationData {
 ///
 /// **Note:** `points` is assumed to be sorted. Weirdness will happen if it is not.
 pub struct InterpolatedSensorControl {
+    #[serde(rename = "input_sensors")]
     input: SensorControl,
     #[serde(default = "default_interpolation_mode")]
     mode: InterpolationMode,
