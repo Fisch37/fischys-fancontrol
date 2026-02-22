@@ -105,23 +105,22 @@ impl From<nvml_wrapper::error::NvmlError> for FanControlError {
     }
 }
 
-#[cfg(not(feature = "nvml"))]
-#[allow(unused_variables)]
-pub fn scan_all(context: &GlobalContext) -> Result<Vec<Box<dyn FanController>>> {
-    Pwm::scan()
-        .map(|vec| vec.into_iter().map(Box::new).map(trait_coerce).collect())
-        .map_err(Into::into)
-}
-
-#[cfg(feature = "nvml")]
+#[allow(unused)]
 /// Scan all available fan controllers and returns the combined results,
 /// or an error if any of the scans failed.
 pub fn scan_all<'a>(context: &'a GlobalContext) -> Result<Vec<Box<dyn FanController + 'a>>> {
+    use std::iter::empty;
+
+    #[cfg(feature = "nvml")]
     use nvml::NVIDIAFanController;
 
-    let pwms = Pwm::scan()?;
-    let nvidia_fans: Vec<NVIDIAFanController> = NVIDIAFanController::scan(context.get_nvml())?;
-    Ok(boxme(pwms).chain(boxme(nvidia_fans)).collect())
+    // TODO: This is awful
+    let pwms = empty();
+    let pwms = pwms.chain(boxme(Pwm::scan()?));
+    #[cfg(feature = "nvml")]
+    let pwms = pwms.chain(boxme(NVIDIAFanController::scan(context.get_nvml())?));
+
+    Ok(pwms.collect())
 }
 
 #[doc(hidden)]
