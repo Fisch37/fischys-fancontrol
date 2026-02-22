@@ -1,6 +1,8 @@
 ## Prerequisites
 - Linux
 - The [rust toolchain](https://rust-lang.org/tools/install/)
+- `clang`
+    - (if on Ubuntu, use `apt install clang`)
 - (optional) SystemD
 
 ## Installation
@@ -13,11 +15,13 @@
 2. Go through `sensors-detect` if you haven't before and ensure the relevant kernel modules are loaded
 3. Run
     ```bash
-    cargo build -r && sudo cp ./target/release/fischys-fancontrol /usr/bin/fischys-fancontrol
+    cargo build -r
+    sudo cp ./target/release/fischys-fancontrol /usr/bin/fischys-fancontrol
     ```
+    - Note: If you want to use the NVML feature, run `cargo build -r -F nvml` as the first line.
 4. If you want to install the systemd service, also run
     ```bash
-    cp fischys-fancontrol.service /etc/systemd/system/
+    sudo cp fischys-fancontrol.service /etc/systemd/system/
     ```
 
 ## Configuring the Service
