@@ -14,8 +14,8 @@ pub mod curves;
 pub mod fan_configuration;
 pub mod fan_discovery;
 pub mod groupie;
-pub mod utils;
 pub mod nvml_extensions;
+pub mod utils;
 
 pub const APP_ID: &str = "fischys-fancontrol";
 pub const POLL_ENV: &str = "POLL_RATE";
@@ -84,6 +84,7 @@ pub enum CmdArgs {
     Service,
     ListSensors(ListSensorsArgs),
     Characteristics(CharacteristicsArgs),
+    Console,
 }
 
 fn main() {
@@ -91,5 +92,6 @@ fn main() {
         CmdArgs::Service => commands::service::start(),
         CmdArgs::ListSensors(args) => commands::list_sensors::start(args),
         CmdArgs::Characteristics(args) => commands::characteristics::start(args),
+        CmdArgs::Console => commands::interactive_console::start(),
     }
 }
